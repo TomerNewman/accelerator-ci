@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for GPU operator verification tests."""
+"""Shared pytest fixtures for GPU verification tests."""
 
 from __future__ import annotations
 
@@ -13,11 +13,7 @@ logger = logging.getLogger(__name__)
 
 @pytest.fixture(scope="session")
 def load_kubeconfig():
-    """Load Kubernetes configuration once per session.
-
-    When ``KUBECONFIG`` is set explicitly, honour it even when running
-    inside a cluster so that tests target the intended cluster.
-    """
+    """Honour KUBECONFIG env even when running inside a cluster."""
     kubeconfig_env = os.environ.get("KUBECONFIG")
     if kubeconfig_env:
         try:

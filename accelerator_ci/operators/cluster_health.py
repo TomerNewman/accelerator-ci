@@ -1,4 +1,4 @@
-"""Cluster health checks for OpenShift."""
+"""Cluster health polling (nodes, ClusterOperators, MachineConfigPools)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ def wait_for_cluster_stability(
     timeout: int = 900,
     poll_interval: int = 20,
 ) -> None:
-    """Tolerates temporary API unavailability (e.g. during node reboots on SNO clusters)."""
+    """Tolerates temporary API unavailability during SNO reboots."""
     print("Waiting for cluster stability...")
     start = time.monotonic()
     while time.monotonic() - start < timeout:
@@ -82,7 +82,7 @@ def wait_for_mcp_updated(
     timeout: int = 900,
     poll_interval: int = 20,
 ) -> None:
-    """Tolerates API downtime during SNO node reboots triggered by MachineConfig changes."""
+    """Tolerates API downtime during SNO reboots from MachineConfig changes."""
     print("Waiting for MachineConfigPool to finish updating...")
     start = time.monotonic()
     saw_updating = False

@@ -1,7 +1,4 @@
-"""Remote host management for cluster deployment.
-
-Reference: https://kcli.readthedocs.io/en/latest/#prerequisites
-"""
+"""Remote libvirt host management (kcli prerequisites, SSH, PCI passthrough)."""
 
 from __future__ import annotations
 
@@ -47,18 +44,7 @@ def setup_remote_libvirt(host: str, user: str) -> None:
 
     ssh_success, ssh_error = check_ssh_connectivity(host, user)
     if not ssh_success:
-        ssh_opts = get_ssh_opts()
-        error_details = (
-            f"Cannot connect via SSH to {user}@{host}\n"
-            f"SSH command: ssh {ssh_opts} {user}@{host}\n"
-            f"Error: {ssh_error}\n\n"
-            "Troubleshooting:\n"
-            "1. Verify the SSH key has correct permissions (chmod 600)\n"
-            "2. Verify the remote host is reachable (ping)\n"
-            "3. Verify SSH key is authorized on the remote host\n"
-            f"4. Try manually: ssh {ssh_opts} {user}@{host} 'echo test'"
-        )
-        raise DeployError(error_details)
+        raise DeployError(f"Cannot SSH to {user}@{host}: {ssh_error}")
     print("  SSH connection verified.")
 
     result = ssh_cmd(host, user, "command -v virsh", check=False)
@@ -178,10 +164,7 @@ def _create_ssh_config(host: str, user: str, key_path: str) -> None:
 
 
 def _create_ssh_wrapper(key_path: str) -> None:
-    """Setup SSH agent with the key for kcli.
-
-    kcli uses libssh which respects SSH_AUTH_SOCK from ssh-agent.
-    """
+    """Set up ssh-agent with the key for kcli (which uses libssh)."""
     ssh_dir = Path.home() / ".ssh"
     ssh_dir.mkdir(mode=0o700, exist_ok=True)
 
@@ -437,8 +420,7 @@ def attach_pci_devices(
     pci_devices: list[str],
     pre_start_hook: Optional[Callable[[], None]] = None,
 ) -> None:
-    """Attach PCI devices to a VM for GPU passthrough. Shuts down the VM,
-    attaches devices, calls pre_start_hook if provided, then restarts."""
+    """Shut down VM, attach PCI devices for GPU passthrough, then restart."""
     print(f"Attaching {len(pci_devices)} PCI device(s) to VM '{vm_name}'...")
 
     vm_state = ssh_cmd(host, user, f"virsh domstate {vm_name}", check=False)
@@ -467,7 +449,7 @@ def attach_pci_devices(
 
         parts = pci_addr.replace(":", " ").replace(".", " ").split()
         if len(parts) != 4:
-            raise DeployError(f"Invalid PCI address format: {pci_addr}. Expected format: 0000:XX:YY.Z")
+            raise DeployError(f"Invalid PCI address: {pci_addr} (expected 0000:XX:YY.Z)")
 
         domain, bus, slot, function = parts
 
@@ -475,9 +457,7 @@ def attach_pci_devices(
             for part in (domain, bus, slot, function):
                 int(part, 16)
         except ValueError as err:
-            raise DeployError(
-                f"Invalid PCI address: {pci_addr}. Components must be valid hexadecimal values."
-            ) from err
+            raise DeployError(f"Invalid PCI address: {pci_addr} (non-hex component)") from err
 
         xml_file = f"/tmp/pci-{pci_addr.replace(':', '-').replace('.', '-')}.xml"
         xml_content = (
@@ -522,9 +502,6 @@ def attach_pci_devices(
             break
 
     if not vm_started:
-        raise DeployError(
-            f"VM '{vm_name}' failed to start after PCI device attachment. "
-            f"Check 'virsh dumpxml {vm_name}' and system logs for IOMMU/passthrough issues."
-        )
+        raise DeployError(f"VM '{vm_name}' failed to start after PCI device attachment.")
 
     print("PCI device attachment complete.")

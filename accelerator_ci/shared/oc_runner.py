@@ -1,4 +1,4 @@
-"""Abstraction for running oc/kubectl against a cluster (local or remote)."""
+"""oc command runner: local (subprocess) and remote (SSH)."""
 
 from __future__ import annotations
 

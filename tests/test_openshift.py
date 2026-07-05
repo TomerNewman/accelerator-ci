@@ -1,5 +1,3 @@
-"""Tests for OCP version resolution."""
-
 from __future__ import annotations
 
 import pytest

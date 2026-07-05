@@ -1,5 +1,3 @@
-"""Tests for version utilities."""
-
 from accelerator_ci.shared.version_utils import max_version
 
 

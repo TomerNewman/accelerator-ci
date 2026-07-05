@@ -1,4 +1,4 @@
-"""OpenShift prerequisites for GPU operator installation."""
+"""OpenShift prerequisites for operator installation."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ REQUIRED_OPERATOR_PATTERNS = [
 
 
 def verify_required_operators(oc: OcRunner, timeout: int = 300) -> None:
-    """Verify required operators have running pods (all namespaces)."""
     print("Verifying required cluster operators...")
     start = time.monotonic()
     while True:
@@ -51,7 +50,6 @@ def verify_required_operators(oc: OcRunner, timeout: int = 300) -> None:
 
 
 def configure_internal_registry(oc: OcRunner, timeout: int = 120) -> None:
-    """Enable and configure the OpenShift internal image registry."""
     print("Configuring OpenShift internal image registry...")
 
     r = oc.oc(

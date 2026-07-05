@@ -1,5 +1,3 @@
-"""Tests for the CLI argument parsing and entrypoint."""
-
 from __future__ import annotations
 
 import pytest

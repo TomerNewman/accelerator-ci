@@ -1,4 +1,4 @@
-"""Pod lifecycle and GPU workload helpers for verification tests."""
+"""GPU workload pod helpers for verification tests."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ def delete_pod_if_exists(
     namespace: str,
     timeout: int = DEFAULT_POD_DELETION_TIMEOUT,
 ) -> None:
-    """Delete a pod and block until it is gone."""
     try:
         core_api.delete_namespaced_pod(name, namespace)
     except ApiException as exc:
@@ -50,11 +49,7 @@ def wait_for_pod_done(
     namespace: str,
     timeout: int = DEFAULT_POD_COMPLETION_TIMEOUT,
 ) -> str:
-    """Wait for a pod to reach Succeeded or Failed and return the phase.
-
-    Raises early with a descriptive message if the pod is stuck due to
-    image-pull errors, scheduling failures, or other non-transient issues.
-    """
+    """Wait for pod to finish. Raises early on non-transient errors."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         pod = core_api.read_namespaced_pod(name, namespace)
@@ -89,7 +84,6 @@ def check_pending_pod_errors(
     name: str,
     namespace: str,
 ) -> None:
-    """Raise immediately if the pod is stuck for a non-transient reason."""
     for cs in pod.status.container_statuses or []:
         waiting = cs.state and cs.state.waiting
         if waiting and waiting.reason in FATAL_WAITING_REASONS:
@@ -111,7 +105,6 @@ def check_pending_pod_errors(
 
 
 def describe_pod_status(pod: client.V1Pod) -> str:
-    """Return a short human-readable summary of a pod's current status."""
     parts: list[str] = []
     for cs in pod.status.container_statuses or []:
         waiting = cs.state and cs.state.waiting
@@ -134,7 +127,7 @@ def run_gpu_command(
     gpu_count: str = "1",
     timeout: int = DEFAULT_POD_COMPLETION_TIMEOUT,
 ) -> str:
-    """Create a privileged pod with a GPU, run *command*, and return its logs."""
+    """Run a command in a privileged GPU pod and return its logs."""
     delete_pod_if_exists(core_api, pod_name, namespace)
 
     pod_body = client.V1Pod(

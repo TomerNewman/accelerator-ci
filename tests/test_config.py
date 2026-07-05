@@ -1,5 +1,3 @@
-"""Tests for cluster configuration parsing."""
-
 from __future__ import annotations
 
 import pytest

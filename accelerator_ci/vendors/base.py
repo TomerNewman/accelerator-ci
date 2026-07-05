@@ -1,4 +1,4 @@
-"""Abstract base class for GPU vendor profiles."""
+"""Base class for GPU vendor profiles."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ if TYPE_CHECKING:
 
 @dataclass
 class OperatorSpec:
-    """OLM operator subscription specification."""
-
     name: str
     package: str
     namespace: str
@@ -25,73 +23,43 @@ class OperatorSpec:
 
 
 class VendorProfile(ABC):
-    """Vendor-specific behavior for GPU operator CI."""
 
     @property
     @abstractmethod
-    def display_name(self) -> str:
-        """Human-readable vendor name (e.g. "My GPU Operator")."""
+    def display_name(self) -> str: ...
 
     @abstractmethod
-    def get_operators(self, vendor_config: dict[str, Any]) -> list[OperatorSpec]:
-        """Return the ordered list of OLM operators to install."""
+    def get_operators(self, vendor_config: dict[str, Any]) -> list[OperatorSpec]: ...
 
     @abstractmethod
     def pre_operator_setup(
-        self,
-        oc: OcRunner,
-        vendor_config: dict[str, Any],
-        machine_config_role: str,
-    ) -> None:
-        """Pre-install steps (e.g. driver blacklist MachineConfig)."""
+        self, oc: OcRunner, vendor_config: dict[str, Any], machine_config_role: str,
+    ) -> None: ...
 
     @abstractmethod
     def post_operator_setup(
-        self,
-        oc: OcRunner,
-        vendor_config: dict[str, Any],
-        ocp_version: str | None,
-    ) -> None:
-        """Post-install steps (e.g. NFD rules, vendor CRs, monitoring)."""
+        self, oc: OcRunner, vendor_config: dict[str, Any], ocp_version: str | None,
+    ) -> None: ...
 
     @abstractmethod
-    def wait_for_gpu_ready(
-        self,
-        oc: OcRunner,
-        timeout: int = 900,
-    ) -> None:
-        """Wait for GPU resources to be available on nodes."""
+    def wait_for_gpu_ready(self, oc: OcRunner, timeout: int = 900) -> None: ...
 
     @abstractmethod
-    def cleanup(self, oc: OcRunner) -> None:
-        """Remove the vendor's operator stack."""
+    def cleanup(self, oc: OcRunner) -> None: ...
 
     @abstractmethod
-    def get_test_path(self) -> str:
-        """Return the path (relative to repo root) to vendor's pytest tests."""
+    def get_test_path(self) -> str: ...
 
     def host_setup(
-        self,
-        host: str,
-        user: str,
-        ssh_key: str | None,
-        vendor_config: dict[str, Any],
+        self, host: str, user: str, ssh_key: str | None, vendor_config: dict[str, Any],
     ) -> None:
-        """Pre-deploy host preparation. Called before cluster deployment
-        when --vendor-module is provided. Default: no-op."""
+        """Called before cluster deployment when --vendor-module is provided."""
 
     def get_pci_devices(
-        self,
-        host: str,
-        user: str,
-        ssh_key: str | None,
-        vendor_config: dict[str, Any],
+        self, host: str, user: str, ssh_key: str | None, vendor_config: dict[str, Any],
     ) -> list[str]:
-        """Return PCI addresses to passthrough. Called after host_setup().
-        Returned addresses are merged with pci_devices from config.
-        Default: empty list (use config only)."""
+        """Return PCI addresses to passthrough. Merged with config pci_devices."""
         return []
 
     def resolve_operator_version(self, version: str) -> str:
-        """Resolve a minor version (e.g. "1.4") to the latest patch."""
         return version

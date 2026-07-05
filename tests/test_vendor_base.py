@@ -1,5 +1,3 @@
-"""Tests for VendorProfile ABC and OperatorSpec."""
-
 from __future__ import annotations
 
 import pytest
