@@ -1,0 +1,57 @@
+# See README for field documentation.
+# Vendor-specific behavior is selected via --vendor-module on the CLI.
+
+ocp_version: "4.20"
+pull_secret_path: ~/keys/pull-secret.json
+
+cluster_name: ocp
+domain: example.com
+ctlplanes: 1
+workers: 0
+
+ctlplane:
+  numcpus: 6
+  memory: 18432
+
+worker:
+  numcpus: 4
+  memory: 16384
+
+disk_size: 120
+network: default
+api_ip: "192.168.122.253"
+
+remote:
+  host: null
+  user: root
+  ssh_key_path: null
+
+pci_devices: []
+wait_timeout: 3600
+version_channel: stable
+
+# GPU vendor: amd | nvidia | intel
+vendor: amd
+
+# Must-gather diagnostics
+must_gather:
+  artifact_dir: ./must-gather-output
+
+# Post-install: install GPU operator and dependencies via OLM
+# Fields beyond install/machine_config_role are vendor-specific
+# and parsed by the corresponding vendor profile.
+operators:
+  install: false
+  machine_config_role: worker   # use "master" for Single Node OpenShift (SNO)
+
+  # AMD-specific (when vendor: amd):
+  # gpu_operator_version: "1.4"
+  # driver_version: "30.20.1"
+  # enable_metrics: true
+
+  # NVIDIA-specific (when vendor: nvidia):
+  # gpu_operator_version: "24.9"
+  # driver_version: "550.127.05"
+
+  # Intel-specific (when vendor: intel):
+  # gpu_plugin_version: "0.30"

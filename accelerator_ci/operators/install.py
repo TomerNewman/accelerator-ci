@@ -1,0 +1,208 @@
+"""Generic OLM operator installation primitives."""
+
+from __future__ import annotations
+
+import json
+import time
+
+from accelerator_ci.operators.errors import OperatorError
+from accelerator_ci.shared.oc_runner import OcRunner
+
+
+def ensure_namespace(oc: OcRunner, name: str) -> None:
+    r = oc.oc("get", "namespace", name, timeout=10)
+    if r.returncode == 0:
+        return
+    r = oc.oc("create", "namespace", name, timeout=10)
+    if r.returncode != 0:
+        raise OperatorError(f"Failed to create namespace {name}: {r.stderr or r.stdout}")
+
+
+def create_operator_group(
+    oc: OcRunner,
+    namespace: str,
+    name: str,
+    all_namespaces: bool = False,
+) -> None:
+    """Use all_namespaces=True for operators that only support AllNamespaces."""
+    if all_namespaces:
+        spec_block = "spec: {}"
+    else:
+        spec_block = f"""spec:
+  targetNamespaces:
+  - {namespace}"""
+    yaml = f"""apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: {name}
+  namespace: {namespace}
+{spec_block}
+"""
+    oc.apply_yaml(yaml)
+
+
+def create_subscription(
+    oc: OcRunner,
+    namespace: str,
+    name: str,
+    package: str,
+    catalog: str,
+    channel: str,
+    starting_csv: str | None = None,
+    manual_approval: bool = False,
+) -> None:
+    approval = "Manual" if manual_approval else "Automatic"
+    starting_csv_block = ""
+    if starting_csv:
+        starting_csv_block = f"\n  startingCSV: {starting_csv}"
+    yaml = f"""apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: {name}
+  namespace: {namespace}
+spec:
+  channel: {channel}
+  installPlanApproval: {approval}
+  name: {package}
+  source: {catalog}
+  sourceNamespace: openshift-marketplace
+{starting_csv_block}
+"""
+    oc.apply_yaml(yaml)
+
+
+def approve_install_plan(
+    oc: OcRunner, namespace: str, csv_name: str, timeout: int = 300
+) -> None:
+    """Wait for an InstallPlan targeting csv_name and approve it."""
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        r = oc.oc(
+            "get", "installplan", "-n", namespace, "-o", "json",
+            timeout=15,
+        )
+        if r.returncode == 0 and r.stdout:
+            try:
+                items = json.loads(r.stdout).get("items", [])
+            except json.JSONDecodeError:
+                items = []
+            for ip in items:
+                csvs = (ip.get("spec") or {}).get("clusterServiceVersionNames") or []
+                approved = (ip.get("spec") or {}).get("approved", False)
+                if csv_name in csvs and not approved:
+                    ip_name = ip["metadata"]["name"]
+                    print(f"  Approving InstallPlan {ip_name} for {csv_name}...")
+                    patch_r = oc.oc(
+                        "patch", "installplan", ip_name, "-n", namespace,
+                        "--type", "merge", "-p", '{"spec":{"approved":true}}',
+                        timeout=15,
+                    )
+                    if patch_r.returncode != 0:
+                        print(f"  Patch failed (rc={patch_r.returncode}): {patch_r.stderr or patch_r.stdout}, retrying...")
+                        break
+                    return
+        time.sleep(10)
+    raise OperatorError(f"Timeout ({timeout}s) waiting for InstallPlan for {csv_name}")
+
+
+def wait_for_csv(oc: OcRunner, namespace: str, timeout: int = 600) -> None:
+    """Wait for any installing CSV in namespace to reach Succeeded."""
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        r = oc.oc(
+            "get", "csv", "-n", namespace, "-o", "jsonpath={.items[*].status.phase}",
+            timeout=30,
+        )
+        if r.returncode != 0:
+            time.sleep(15)
+            continue
+        phases = (r.stdout or "").split()
+        if not phases:
+            time.sleep(15)
+            continue
+        if all(p == "Succeeded" for p in phases):
+            return
+        if "Failed" in phases:
+            r2 = oc.oc("get", "csv", "-n", namespace, "-o", "yaml", timeout=10)
+            raise OperatorError(
+                f"CSV in {namespace} failed: {r2.stdout or 'check oc get csv -n ' + namespace}"
+            )
+        print(f"  Waiting for operator CSV in {namespace}... ({phases})")
+        time.sleep(15)
+    raise OperatorError(f"Timeout ({timeout}s) waiting for CSV in {namespace}")
+
+
+def wait_for_subscription_installed(
+    oc: OcRunner, namespace: str, subscription_name: str, timeout: int = 600
+) -> str:
+    """Wait for subscription to have installedCSV set, or raise on ResolutionFailed."""
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        r = oc.oc(
+            "get", "subscription", subscription_name, "-n", namespace, "-o", "json",
+            timeout=15,
+        )
+        if r.returncode != 0:
+            time.sleep(10)
+            continue
+        try:
+            sub = json.loads(r.stdout or "{}")
+        except json.JSONDecodeError:
+            time.sleep(10)
+            continue
+        conditions = (sub.get("status") or {}).get("conditions") or []
+        for c in conditions:
+            if c.get("type") == "ResolutionFailed" and c.get("status") == "True":
+                msg = c.get("message") or "Subscription resolution failed."
+                raise OperatorError(
+                    f"Operator subscription '{subscription_name}' failed: {msg}"
+                )
+        installed = (sub.get("status") or {}).get("installedCSV", "").strip()
+        if installed:
+            return installed
+        print(f"  Waiting for subscription {subscription_name} to resolve...")
+        time.sleep(10)
+    raise OperatorError(
+        f"Timeout ({timeout}s) waiting for subscription {subscription_name} to install (no installedCSV)."
+    )
+
+
+def wait_for_csv_by_name(
+    oc: OcRunner, namespace: str, csv_name: str, timeout: int = 600
+) -> None:
+    """Wait for a specific CSV to reach Succeeded."""
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        r = oc.oc(
+            "get", "csv", csv_name, "-n", namespace,
+            "-o", "jsonpath={.status.phase}",
+            timeout=10,
+        )
+        if r.returncode == 0:
+            phase = (r.stdout or "").strip()
+            if phase == "Succeeded":
+                return
+            if phase == "Failed":
+                r2 = oc.oc("get", "csv", csv_name, "-n", namespace, "-o", "yaml", timeout=10)
+                raise OperatorError(f"CSV {csv_name} failed: {r2.stdout or 'check oc get csv'}")
+        time.sleep(10)
+    raise OperatorError(f"Timeout ({timeout}s) waiting for CSV {csv_name} to reach Succeeded.")
+
+
+def wait_for_crd(oc: OcRunner, crd_name: str, timeout: int = 120) -> None:
+    """Wait for a CRD to exist and become Established."""
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        r = oc.oc("get", "crd", crd_name, "--no-headers", timeout=15)
+        if r.returncode != 0:
+            time.sleep(5)
+            continue
+        r2 = oc.oc(
+            "get", "crd", crd_name,
+            "-o", "jsonpath={.status.conditions[?(@.type==\"Established\")].status}",
+            timeout=10,
+        )
+        if r2.returncode == 0 and (r2.stdout or "").strip() == "True":
+            return
+        time.sleep(5)
+    raise OperatorError(f"Timeout ({timeout}s) waiting for CRD {crd_name}.")
