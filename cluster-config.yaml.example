@@ -30,8 +30,8 @@ pci_devices: []
 wait_timeout: 3600
 version_channel: stable
 
-# GPU vendor: amd | nvidia | intel
-vendor: amd
+# Informational vendor label (actual behavior comes from --vendor-module)
+vendor: ""
 
 # Must-gather diagnostics
 must_gather:
@@ -44,14 +44,7 @@ operators:
   install: false
   machine_config_role: worker   # use "master" for Single Node OpenShift (SNO)
 
-  # AMD-specific (when vendor: amd):
+  # Add vendor-specific fields here. They are passed as a dict
+  # to the vendor profile's methods. For example:
   # gpu_operator_version: "1.4"
   # driver_version: "30.20.1"
-  # enable_metrics: true
-
-  # NVIDIA-specific (when vendor: nvidia):
-  # gpu_operator_version: "24.9"
-  # driver_version: "550.127.05"
-
-  # Intel-specific (when vendor: intel):
-  # gpu_plugin_version: "0.30"

@@ -30,7 +30,7 @@ class VendorProfile(ABC):
     @property
     @abstractmethod
     def display_name(self) -> str:
-        """Human-readable vendor name (e.g. "AMD GPU Operator")."""
+        """Human-readable vendor name (e.g. "My GPU Operator")."""
 
     @abstractmethod
     def get_operators(self, vendor_config: dict[str, Any]) -> list[OperatorSpec]:

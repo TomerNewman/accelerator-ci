@@ -17,11 +17,11 @@ class TestParseArgs:
     def test_operators_with_vendor(self):
         args = parse_args([
             "--config", "config.yaml",
-            "--vendor-module", "amd_ci.profile",
+            "--vendor-module", "my_vendor.profile",
             "operators",
         ])
         assert args.command == "operators"
-        assert args.vendor_module == "amd_ci.profile"
+        assert args.vendor_module == "my_vendor.profile"
 
     def test_short_config_flag(self):
         args = parse_args(["-c", "config.yaml", "delete"])

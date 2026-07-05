@@ -171,7 +171,7 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             pci_devices=pci_devices,
             wait_timeout=raw_config["wait_timeout"],
             version_channel=raw_config["version_channel"],
-            vendor=raw_config.get("vendor", "amd"),
+            vendor=raw_config.get("vendor", ""),
             operators=operators,
             must_gather=must_gather,
         )

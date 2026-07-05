@@ -32,7 +32,7 @@ MINIMAL_CONFIG = {
     "pci_devices": [],
     "wait_timeout": 3600,
     "version_channel": "stable",
-    "vendor": "amd",
+    "vendor": "generic",
     "operators": {"install": False, "machine_config_role": "worker"},
     "must_gather": {"artifact_dir": "./must-gather-output"},
 }

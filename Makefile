@@ -18,7 +18,7 @@ ifndef CONFIG_FILE_PATH
 	$(error CONFIG_FILE_PATH is required)
 endif
 ifndef VENDOR_MODULE
-	$(error VENDOR_MODULE is required. Usage: make cluster-operators CONFIG_FILE_PATH=... VENDOR_MODULE=amd_ci.profile)
+	$(error VENDOR_MODULE is required. Usage: make cluster-operators CONFIG_FILE_PATH=... VENDOR_MODULE=my_vendor.profile)
 endif
 	accelerator-ci --config $(CONFIG_FILE_PATH) --vendor-module $(VENDOR_MODULE) operators
 
@@ -27,7 +27,7 @@ ifndef CONFIG_FILE_PATH
 	$(error CONFIG_FILE_PATH is required)
 endif
 ifndef VENDOR_MODULE
-	$(error VENDOR_MODULE is required. Usage: make test-gpu CONFIG_FILE_PATH=... VENDOR_MODULE=amd_ci.profile)
+	$(error VENDOR_MODULE is required. Usage: make test-gpu CONFIG_FILE_PATH=... VENDOR_MODULE=my_vendor.profile)
 endif
 	accelerator-ci --config $(CONFIG_FILE_PATH) --vendor-module $(VENDOR_MODULE) test-gpu
 
@@ -61,6 +61,6 @@ help:
 	@echo "  make test-gpu          CONFIG_FILE_PATH=<path> VENDOR_MODULE=<module>"
 	@echo "  make cluster-cleanup   CONFIG_FILE_PATH=<path> VENDOR_MODULE=<module>"
 	@echo ""
-	@echo "Example: make cluster-operators CONFIG_FILE_PATH=cluster-config.yaml VENDOR_MODULE=amd_ci.profile"
+	@echo "Example: make cluster-operators CONFIG_FILE_PATH=cluster-config.yaml VENDOR_MODULE=my_vendor.profile"
 
 .PHONY: cluster-deploy cluster-delete cluster-operators test-gpu cluster-cleanup must-gather help

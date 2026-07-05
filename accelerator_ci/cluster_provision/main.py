@@ -24,7 +24,7 @@ def _kubeconfig_path(cluster_name: str) -> Path:
 
 
 def _load_vendor_profile(vendor_module: str):
-    """Load a VendorProfile from the given module path (e.g. 'amd_ci.profile')."""
+    """Load a VendorProfile from the given module path (e.g. 'my_vendor.profile')."""
     try:
         mod = importlib.import_module(vendor_module)
         for attr in ("VendorProfile", "Profile"):
@@ -66,7 +66,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog="""
 Examples:
   %(prog)s --config cluster-config.yaml deploy
-  %(prog)s --config cluster-config.yaml --vendor-module amd_ci.profile operators
+  %(prog)s --config cluster-config.yaml --vendor-module my_vendor.profile operators
 """,
     )
 
@@ -79,7 +79,7 @@ Examples:
     parser.add_argument(
         "--vendor-module",
         dest="vendor_module",
-        help="Python module path to VendorProfile (e.g. 'amd_ci.profile'). "
+        help="Python module path to VendorProfile (e.g. 'my_vendor.profile'). "
              "Required for operators, test-gpu, and cleanup commands.",
     )
 

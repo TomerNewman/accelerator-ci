@@ -2,7 +2,7 @@
 
 Multi-vendor CI framework for testing GPU accelerator operators on OpenShift. Provisions clusters via kcli/libvirt, installs operator stacks through OLM, and runs GPU verification tests.
 
-Supports **AMD**, **NVIDIA**, **Intel**, and any vendor that implements the `VendorProfile` interface.
+Any GPU vendor can integrate by implementing the `VendorProfile` interface.
 
 ## Installation
 
@@ -26,9 +26,9 @@ accelerator-ci --config cluster-config.yaml delete
 accelerator-ci --config cluster-config.yaml must-gather
 
 # Vendor operations (require --vendor-module)
-accelerator-ci --config cluster-config.yaml --vendor-module amd_ci.profile operators
-accelerator-ci --config cluster-config.yaml --vendor-module amd_ci.profile test-gpu
-accelerator-ci --config cluster-config.yaml --vendor-module amd_ci.profile cleanup
+accelerator-ci --config cluster-config.yaml --vendor-module my_vendor.profile operators
+accelerator-ci --config cluster-config.yaml --vendor-module my_vendor.profile test-gpu
+accelerator-ci --config cluster-config.yaml --vendor-module my_vendor.profile cleanup
 ```
 
 ## Workflow
@@ -48,7 +48,7 @@ cluster-deploy → cluster-operators → test-gpu → cluster-cleanup → cluste
 
 ## Creating a Vendor Repo
 
-Step-by-step guide for building a new vendor CI repo (e.g. `amd-ci`, `nvidia-ci`).
+Step-by-step guide for building a new vendor CI repo.
 
 ### 1. Set up the repo
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Multi-vendor CI framework for testing GPU accelerator operators on OpenShift. Pip-installable package (`accelerator-ci`) that provides cluster provisioning, OLM operator installation, and GPU test infrastructure. Vendor repos (amd-ci, nvidia-ci, etc.) depend on this package and implement the `VendorProfile` interface.
+Multi-vendor CI framework for testing GPU accelerator operators on OpenShift. Pip-installable package (`accelerator-ci`) that provides cluster provisioning, OLM operator installation, and GPU test infrastructure. Vendor repos depend on this package and implement the `VendorProfile` interface.
 
 ## Development Setup
 
@@ -19,12 +19,12 @@ pip install -e .
 ```bash
 # CLI (installed via pip install -e .)
 accelerator-ci --config cluster-config.yaml deploy
-accelerator-ci --config cluster-config.yaml --vendor-module amd_ci.profile operators
-accelerator-ci --config cluster-config.yaml --vendor-module amd_ci.profile test-gpu
+accelerator-ci --config cluster-config.yaml --vendor-module my_vendor.profile operators
+accelerator-ci --config cluster-config.yaml --vendor-module my_vendor.profile test-gpu
 
 # Or via make
 make cluster-deploy CONFIG_FILE_PATH=cluster-config.yaml
-make cluster-operators CONFIG_FILE_PATH=cluster-config.yaml VENDOR_MODULE=amd_ci.profile
+make cluster-operators CONFIG_FILE_PATH=cluster-config.yaml VENDOR_MODULE=my_vendor.profile
 ```
 
 ## Architecture
@@ -58,10 +58,10 @@ Single top-level Python package, pip-installable via `pyproject.toml`. Vendor re
 Vendor repos implement `accelerator_ci.vendors.base.VendorProfile`. The CLI loads vendor profiles dynamically via `--vendor-module`:
 
 ```bash
-accelerator-ci --config config.yaml --vendor-module amd_ci.profile operators
+accelerator-ci --config config.yaml --vendor-module my_vendor.profile operators
 ```
 
-This imports `amd_ci.profile` and looks for a `VendorProfile` or `Profile` class.
+This imports `my_vendor.profile` and looks for a `VendorProfile` or `Profile` class.
 
 ## Key Patterns
 

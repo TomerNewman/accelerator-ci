@@ -65,7 +65,7 @@ data = json.load(sys.stdin)
 for node in data.get('items', []):
     name = node['metadata']['name']
     labels = {k: v for k, v in node['metadata'].get('labels', {}).items()
-              if any(x in k for x in ['gpu', 'accelerator', 'feature.node', 'amd', 'nvidia', 'intel'])}
+              if any(x in k for x in ['gpu', 'accelerator', 'feature.node', 'pci'])}
     if labels:
         print(f'{name}:')
         for k, v in sorted(labels.items()):
