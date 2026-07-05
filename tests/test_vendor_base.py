@@ -80,6 +80,14 @@ class TestVendorProfile:
         assert ops[0].name == "fake-operator"
         assert ops[0].namespace == "fake-ns"
 
+    def test_host_setup_default_noop(self):
+        vendor = FakeVendor()
+        assert vendor.host_setup("host", "root", None, {}) is None
+
+    def test_get_pci_devices_default_empty(self):
+        vendor = FakeVendor()
+        assert vendor.get_pci_devices("host", "root", None, {}) == []
+
     def test_resolve_operator_version_default(self):
         vendor = FakeVendor()
         assert vendor.resolve_operator_version("1.4") == "1.4"

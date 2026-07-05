@@ -70,6 +70,28 @@ class VendorProfile(ABC):
     def get_test_path(self) -> str:
         """Return the path (relative to repo root) to vendor's pytest tests."""
 
+    def host_setup(
+        self,
+        host: str,
+        user: str,
+        ssh_key: str | None,
+        vendor_config: dict[str, Any],
+    ) -> None:
+        """Pre-deploy host preparation. Called before cluster deployment
+        when --vendor-module is provided. Default: no-op."""
+
+    def get_pci_devices(
+        self,
+        host: str,
+        user: str,
+        ssh_key: str | None,
+        vendor_config: dict[str, Any],
+    ) -> list[str]:
+        """Return PCI addresses to passthrough. Called after host_setup().
+        Returned addresses are merged with pci_devices from config.
+        Default: empty list (use config only)."""
+        return []
+
     def resolve_operator_version(self, version: str) -> str:
         """Resolve a minor version (e.g. "1.4") to the latest patch."""
         return version

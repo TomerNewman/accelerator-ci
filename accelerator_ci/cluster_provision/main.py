@@ -118,17 +118,33 @@ def main(argv: list[str] | None = None) -> int:
     if command == "deploy":
         ocp_version = update_version_to_latest_patch(config.ocp_version, config.version_channel)
 
+        pci_devices = list(config.pci_devices)
+
+        if args.vendor_module:
+            vendor = _load_vendor_profile(args.vendor_module)
+            host_args = dict(
+                host=config.remote.host or "localhost",
+                user=config.remote.user,
+                ssh_key=config.remote.ssh_key_path,
+                vendor_config=config.operators.vendor_config,
+            )
+            vendor.host_setup(**host_args)
+            extra_devices = vendor.get_pci_devices(**host_args)
+            if extra_devices:
+                pci_devices.extend(extra_devices)
+                print(f"Vendor provided {len(extra_devices)} PCI device(s): {extra_devices}")
+
         params = get_kcli_params(config, ocp_version)
 
         print_config(params)
-        if config.pci_devices:
-            print(f"PCI Passthrough Devices: {config.pci_devices}")
+        if pci_devices:
+            print(f"PCI Passthrough Devices: {pci_devices}")
         print(f"Config file: {args.config_file}")
 
         deploy_cluster(
             params=params,
             remote_host=config.remote.host,
-            pci_devices=config.pci_devices,
+            pci_devices=pci_devices,
             remote_user=config.remote.user,
             wait_timeout=config.wait_timeout,
             ssh_key=config.remote.ssh_key_path,
