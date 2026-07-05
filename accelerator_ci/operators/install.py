@@ -1,4 +1,4 @@
-"""Generic OLM operator installation primitives."""
+"""OLM operator installation primitives."""
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ def create_operator_group(
     name: str,
     all_namespaces: bool = False,
 ) -> None:
-    """Use all_namespaces=True for operators that only support AllNamespaces."""
     if all_namespaces:
         spec_block = "spec: {}"
     else:
@@ -74,7 +73,6 @@ spec:
 def approve_install_plan(
     oc: OcRunner, namespace: str, csv_name: str, timeout: int = 300
 ) -> None:
-    """Wait for an InstallPlan targeting csv_name and approve it."""
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         r = oc.oc(
@@ -106,7 +104,6 @@ def approve_install_plan(
 
 
 def wait_for_csv(oc: OcRunner, namespace: str, timeout: int = 600) -> None:
-    """Wait for any installing CSV in namespace to reach Succeeded."""
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         r = oc.oc(
@@ -135,7 +132,6 @@ def wait_for_csv(oc: OcRunner, namespace: str, timeout: int = 600) -> None:
 def wait_for_subscription_installed(
     oc: OcRunner, namespace: str, subscription_name: str, timeout: int = 600
 ) -> str:
-    """Wait for subscription to have installedCSV set, or raise on ResolutionFailed."""
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         r = oc.oc(
@@ -170,7 +166,6 @@ def wait_for_subscription_installed(
 def wait_for_csv_by_name(
     oc: OcRunner, namespace: str, csv_name: str, timeout: int = 600
 ) -> None:
-    """Wait for a specific CSV to reach Succeeded."""
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         r = oc.oc(
@@ -190,19 +185,14 @@ def wait_for_csv_by_name(
 
 
 def wait_for_crd(oc: OcRunner, crd_name: str, timeout: int = 120) -> None:
-    """Wait for a CRD to exist and become Established."""
     start = time.monotonic()
     while time.monotonic() - start < timeout:
-        r = oc.oc("get", "crd", crd_name, "--no-headers", timeout=15)
-        if r.returncode != 0:
-            time.sleep(5)
-            continue
-        r2 = oc.oc(
+        r = oc.oc(
             "get", "crd", crd_name,
             "-o", "jsonpath={.status.conditions[?(@.type==\"Established\")].status}",
-            timeout=10,
+            timeout=15,
         )
-        if r2.returncode == 0 and (r2.stdout or "").strip() == "True":
+        if r.returncode == 0 and (r.stdout or "").strip() == "True":
             return
         time.sleep(5)
     raise OperatorError(f"Timeout ({timeout}s) waiting for CRD {crd_name}.")
