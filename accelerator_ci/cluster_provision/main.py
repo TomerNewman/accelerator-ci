@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""CLI entrypoint for accelerator-ci cluster lifecycle management."""
+"""CLI entrypoint for accelerator-ci."""
 
 from __future__ import annotations
 
 import argparse
 import importlib
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,21 +25,26 @@ def _kubeconfig_path(cluster_name: str) -> Path:
 
 
 def _load_vendor_profile(vendor_module: str):
-    """Load a VendorProfile from the given module path (e.g. 'my_vendor.profile')."""
+    from accelerator_ci.vendors.base import VendorProfile as _BaseClass
+
     try:
         mod = importlib.import_module(vendor_module)
-        for attr in ("VendorProfile", "Profile"):
-            cls = getattr(mod, attr, None)
-            if cls is not None:
-                return cls()
-        raise AttributeError(f"No VendorProfile or Profile class in {vendor_module}")
-    except (ImportError, AttributeError) as e:
-        print(f"Error: Could not load vendor profile from '{vendor_module}': {e}", file=sys.stderr)
+    except ImportError as e:
+        print(f"Error: Could not import vendor module '{vendor_module}': {e}", file=sys.stderr)
         sys.exit(1)
+
+    for attr in dir(mod):
+        cls = getattr(mod, attr, None)
+        if isinstance(cls, type) and issubclass(cls, _BaseClass) and cls is not _BaseClass:
+            try:
+                return cls()
+            except TypeError:
+                continue
+    print(f"Error: No concrete VendorProfile subclass found in '{vendor_module}'", file=sys.stderr)
+    sys.exit(1)
 
 
 def _get_oc_runner(config):
-    """Create the appropriate OcRunner (local or remote) based on config."""
     if config.remote.host and config.remote.ssh_key_path:
         from accelerator_ci.shared.ssh import set_ssh_key_path
         set_ssh_key_path(config.remote.ssh_key_path)
@@ -94,8 +100,7 @@ Examples:
     return parser.parse_args(argv)
 
 
-def _require_vendor(args) -> object:
-    """Ensure --vendor-module was provided and load the profile."""
+def _require_vendor(args):
     if not args.vendor_module:
         print("Error: --vendor-module is required for this command.", file=sys.stderr)
         sys.exit(1)
@@ -115,6 +120,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
+    try:
+        return _dispatch(args, command, config)
+    except (RuntimeError, OSError, subprocess.CalledProcessError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def _dispatch(args, command: str, config) -> int:
     if command == "deploy":
         ocp_version = update_version_to_latest_patch(config.ocp_version, config.version_channel)
 
@@ -247,12 +260,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
         return 1
-
     return 0
 
 
 def cli() -> None:
-    """Entry point for the accelerator-ci console script."""
     raise SystemExit(main())
 
 

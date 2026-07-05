@@ -1,11 +1,4 @@
-"""
-Must-gather support for local and remote clusters.
-
-Local: runs scripts/must-gather.sh with the given KUBECONFIG.
-Remote: SCP the script to the remote host and execute it there
-        (where /root/kubeconfig already exists from deploy), then
-        stream the results back via tar-over-SSH.
-"""
+"""Must-gather support for local and remote clusters."""
 
 from __future__ import annotations
 
@@ -23,7 +16,6 @@ MUST_GATHER_TIMEOUT = 600
 
 
 def run_must_gather(kubeconfig: str, artifact_dir: str) -> int:
-    """Run must-gather locally with the given kubeconfig."""
     env = {**os.environ, "KUBECONFIG": kubeconfig, "ARTIFACT_DIR": artifact_dir}
     result = subprocess.run(
         [str(MUST_GATHER_SCRIPT)], env=env, text=True, timeout=MUST_GATHER_TIMEOUT,
@@ -32,7 +24,6 @@ def run_must_gather(kubeconfig: str, artifact_dir: str) -> int:
 
 
 def run_must_gather_remote(host: str, user: str, artifact_dir: str) -> int:
-    """Run must-gather on a remote host and stream results back via tar-over-SSH."""
     remote_workdir = None
     try:
         mktemp_result = ssh_cmd(
@@ -79,12 +70,22 @@ def run_must_gather_remote(host: str, user: str, artifact_dir: str) -> int:
         extract_proc = subprocess.Popen(tar_extract, stdin=ssh_proc.stdout, stderr=subprocess.PIPE)
         ssh_proc.stdout.close()
 
-        _, extract_err = extract_proc.communicate(timeout=300)
-        ssh_proc.wait(timeout=10)
+        try:
+            _, extract_err = extract_proc.communicate(timeout=300)
+            ssh_proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            ssh_proc.kill()
+            extract_proc.kill()
+            ssh_proc.wait()
+            extract_proc.wait()
+            print("[must-gather] Warning: tar pipeline timed out")
+            return 1
+        finally:
+            if ssh_proc.stderr:
+                ssh_proc.stderr.close()
 
         if ssh_proc.returncode != 0 or extract_proc.returncode != 0:
-            ssh_err = ssh_proc.stderr.read().decode() if ssh_proc.stderr else ""
-            print(f"[must-gather] Warning: failed to copy results back: {ssh_err}{extract_err.decode()}")
+            print(f"[must-gather] Warning: failed to copy results back: {extract_err.decode()}")
             return 1
 
         print(f"[must-gather] Results saved to {artifact_dir}")

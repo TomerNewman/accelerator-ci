@@ -1,4 +1,4 @@
-"""SSH/SCP utilities for remote host access."""
+"""SSH/SCP utilities with multiplexing for CI use."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from pathlib import Path
 
 SSH_CONTROL_PATH = "/tmp/ssh-mux-%r@%h:%p"
 
-# Base SSH options for non-interactive CI/CD use
 SSH_BASE_OPTS = (
     "-o StrictHostKeyChecking=no "
     "-o UserKnownHostsFile=/dev/null "
@@ -24,7 +23,6 @@ SSH_BASE_OPTS = (
     "-o ControlPersist=600"
 )
 
-# Module-level SSH key path (set via set_ssh_key_path)
 ssh_key_path: str | None = None
 
 
@@ -71,6 +69,11 @@ def ssh_cmd(
         )
     except subprocess.TimeoutExpired:
         print(f"  SSH command timed out after {timeout}s: {command[:80]}")
+        if check:
+            raise subprocess.CalledProcessError(
+                124, full_cmd,
+                output="", stderr=f"SSH command timed out after {timeout}s",
+            )
         return subprocess.CompletedProcess(
             args=full_cmd, returncode=1,
             stdout="", stderr=f"SSH command timed out after {timeout}s",
@@ -84,14 +87,17 @@ def scp_cmd(
 ) -> subprocess.CompletedProcess:
     ssh_opts = get_ssh_opts()
     full_cmd = f"scp {ssh_opts} {src} {dest}"
-    return subprocess.run(
-        full_cmd,
-        shell=True,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        return subprocess.run(
+            full_cmd,
+            shell=True,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"SCP timed out after {timeout}s: {src} -> {dest}") from None
 
 
 def close_ssh_multiplexing(host: str, user: str) -> None:

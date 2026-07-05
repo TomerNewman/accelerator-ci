@@ -1,15 +1,13 @@
-"""
-Deploy OpenShift cluster using kcli.
-Supports both local and remote libvirt hosts.
-Default topology is SNO (Single Node OpenShift): 1 control plane, 0 workers.
-"""
+"""Deploy OpenShift cluster using kcli (local or remote libvirt)."""
 
 from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 from accelerator_ci.cluster_provision.common import DeployError, run
 from accelerator_ci.cluster_provision.config import get_cluster_topology_description
@@ -17,11 +15,8 @@ from accelerator_ci.cluster_provision.kcli_preflight import ensure_kcli_installe
 
 
 def push_ssh_key_to_remote(host: str, user: str) -> None:
-    """Copy the CI runner's SSH private key to the remote host.
-
-    kcli injects the CI runner's public key into VMs, but the remote host
-    needs the matching private key to SSH into its own VMs.
-    """
+    """kcli injects the CI runner's public key into VMs, so the remote host
+    needs the matching private key to SSH into its own VMs."""
     from accelerator_ci.shared.ssh import ssh_key_path, scp_cmd, ssh_cmd
 
     local_key = Path(ssh_key_path) if ssh_key_path else Path.home() / ".ssh" / "id_rsa"
@@ -43,10 +38,7 @@ def fix_vm_container_storage(
     host: str, user: str, cluster_name: str, ctlplanes: int
 ) -> None:
     """Wipe pre-baked container storage on RHCOS VMs via guestfish.
-
-    Works around a composefs/overlay bug where ``podman pull`` fails with
-    ``readlink /var/lib/containers/storage/overlay/l: invalid argument``.
-    """
+    Works around a composefs/overlay bug where podman pull fails."""
     from accelerator_ci.shared.ssh import ssh_cmd
 
     print("\nStep 5c: Fixing RHCOS container storage (composefs overlay workaround)...")
@@ -76,7 +68,6 @@ def fix_vm_container_storage(
 
 
 def shutdown_vms(host: str, user: str, cluster_name: str, ctlplanes: int) -> None:
-    """Shut down control plane VMs and wait for them to be off."""
     from accelerator_ci.shared.ssh import ssh_cmd
 
     for idx in range(ctlplanes):
@@ -97,7 +88,6 @@ def shutdown_vms(host: str, user: str, cluster_name: str, ctlplanes: int) -> Non
 
 
 def start_vms(host: str, user: str, cluster_name: str, ctlplanes: int) -> None:
-    """Start control plane VMs."""
     from accelerator_ci.shared.ssh import ssh_cmd
 
     for idx in range(ctlplanes):
@@ -114,20 +104,13 @@ def build_kcli_params(params: dict[str, str]) -> list[str]:
 
 
 def deploy_cluster(
-    params: dict[str, any],
+    params: dict[str, Any],
     remote_host: str | None,
     remote_user: str,
     wait_timeout: int,
     ssh_key: str | None,
     pci_devices: list[str] | None,
 ) -> None:
-    """
-    Main deployment flow, driven by the kcli parameters.
-
-    Deploys the cluster and waits for it to be ready. Does NOT install
-    operators or run tests — use the separate 'operators' and 'test-gpu'
-    commands for those.
-    """
     ensure_kcli_installed()
 
     cluster_name = params["cluster"]
@@ -171,11 +154,10 @@ def deploy_cluster(
 
 
 def deploy_local(
-    params: dict[str, any],
+    params: dict[str, Any],
     ctlplanes: int,
     workers: int,
 ) -> None:
-    """Deploy OpenShift cluster locally using kcli."""
     ensure_kcli_config()
 
     topology = get_cluster_topology_description(ctlplanes, workers)
@@ -191,7 +173,7 @@ def deploy_local(
 
 
 def deploy_remote(
-    params: dict[str, any],
+    params: dict[str, Any],
     cluster_name: str,
     api_ip: str,
     domain: str,
@@ -203,7 +185,6 @@ def deploy_remote(
     ssh_key: str | None = None,
     pci_devices: list[str] | None = None,
 ) -> None:
-    """Deploy OpenShift cluster on a remote libvirt host."""
     from accelerator_ci.cluster_provision.remote import (
         setup_remote_libvirt,
         configure_kcli_remote_client,
@@ -255,94 +236,107 @@ def deploy_remote(
     print(f"  kcli command: {' '.join(kcli_cmd)}")
     print("\n  Starting kcli in background...")
 
+    kcli_log = tempfile.NamedTemporaryFile(mode="w", prefix="kcli-", suffix=".log", delete=False)
+    kcli_log_path = Path(kcli_log.name)
     kcli_process = subprocess.Popen(
         kcli_cmd,
-        stdout=subprocess.PIPE,
+        stdout=kcli_log,
         stderr=subprocess.STDOUT,
-        text=True,
     )
 
-    expected_vms = ctlplanes + workers + 1
-    min_vms_to_proceed = 2
-
-    print("\nStep 5: Waiting for VMs to be deployed...")
-    vm_wait_timeout = 600
-    vm_wait_start = time.time()
-    while True:
-        if kcli_process.poll() is not None:
-            stdout, _ = kcli_process.communicate()
-            if kcli_process.returncode != 0:
-                print(f"\nkcli process exited with code {kcli_process.returncode}")
-                print("kcli output:")
-                print(stdout)
-                raise DeployError(f"kcli deployment failed with exit code {kcli_process.returncode}")
-
-        result = run(["kcli", "-C", kcli_client, "list", "vm"], check=False, capture_output=True)
-        vm_count = result.stdout.count(f"{cluster_name}-")
-
-        if vm_count >= min_vms_to_proceed:
-            print(f"  VMs deployed: {vm_count} VMs found (expecting {expected_vms} total)")
-            break
-
-        elapsed = int(time.time() - vm_wait_start)
-        if elapsed >= vm_wait_timeout:
-            try:
-                kcli_process.terminate()
-                stdout, _ = kcli_process.communicate(timeout=5)
-                print("\nkcli output:")
-                print(stdout)
-            except Exception:
-                pass
-            raise DeployError("Timeout waiting for VMs to be deployed (10 minutes)")
-
-        if elapsed % 30 == 0 or vm_count > 0:
-            print(f"  Waiting for VMs... ({elapsed}s elapsed, found {vm_count} VMs, expecting {expected_vms})")
-        time.sleep(10)
-
-    print("\nVMs on remote host:")
-    run(["kcli", "-C", kcli_client, "list", "vm"], check=False)
-
-    push_ssh_key_to_remote(remote_host, remote_user)
-
-    if pci_devices:
-        print("\nStep 5b: Attaching PCI devices to control plane VM...")
-        ctlplane_vm = f"{cluster_name}-ctlplane-0"
-        attach_pci_devices(
-            remote_host, remote_user, ctlplane_vm, pci_devices,
-            pre_start_hook=lambda: fix_vm_container_storage(
-                remote_host, remote_user, cluster_name, ctlplanes),
-        )
-    else:
-        shutdown_vms(remote_host, remote_user, cluster_name, ctlplanes)
-        fix_vm_container_storage(remote_host, remote_user, cluster_name, ctlplanes)
-        start_vms(remote_host, remote_user, cluster_name, ctlplanes)
-
-    print("\nStep 6: Setting up remote cluster access...")
-    setup_remote_cluster_access(remote_host, remote_user, cluster_name, api_ip, domain)
-
-    print("\nStopping kcli monitoring (we'll monitor via remote host)...")
-    kcli_process.terminate()
     try:
-        kcli_process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        kcli_process.kill()
+        expected_vms = ctlplanes + workers + 1
+        min_vms_to_proceed = 2
 
-    print(f"\nStep 7: Waiting for cluster to be ready...")
-    wait_for_cluster_ready(remote_host, remote_user, api_ip, wait_timeout)
+        print("\nStep 5: Waiting for VMs to be deployed...")
+        vm_wait_timeout = 600
+        vm_wait_start = time.time()
+        while True:
+            if kcli_process.poll() is not None:
+                if kcli_process.returncode != 0:
+                    print(f"\nkcli process exited with code {kcli_process.returncode}")
+                    print("kcli output:")
+                    kcli_log.flush()
+                    print(kcli_log_path.read_text())
+                    raise DeployError(f"kcli deployment failed with exit code {kcli_process.returncode}")
 
-    print("\n" + "=" * 60)
-    print("CLUSTER STATUS")
-    print("=" * 60)
-    status = get_cluster_status(remote_host, remote_user)
-    print(status)
+            result = run(["kcli", "-C", kcli_client, "list", "vm"], check=False, capture_output=True)
+            vm_count = result.stdout.count(f"{cluster_name}-")
 
-    print_access_instructions(
-        host=remote_host,
-        user=remote_user,
-        cluster_name=cluster_name,
-        api_ip=api_ip,
-        domain=domain,
-        kcli_client=kcli_client,
-    )
+            if vm_count >= min_vms_to_proceed:
+                print(f"  VMs deployed: {vm_count} VMs found (expecting {expected_vms} total)")
+                break
 
-    print("\nDeployment completed successfully!")
+            elapsed = int(time.time() - vm_wait_start)
+            if elapsed >= vm_wait_timeout:
+                kcli_process.terminate()
+                try:
+                    kcli_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    kcli_process.kill()
+                kcli_log.flush()
+                print("\nkcli output:")
+                print(kcli_log_path.read_text())
+                raise DeployError("Timeout waiting for VMs to be deployed (10 minutes)")
+
+            if elapsed % 30 == 0 or vm_count > 0:
+                print(f"  Waiting for VMs... ({elapsed}s elapsed, found {vm_count} VMs, expecting {expected_vms})")
+            time.sleep(10)
+
+        print("\nVMs on remote host:")
+        run(["kcli", "-C", kcli_client, "list", "vm"], check=False)
+
+        push_ssh_key_to_remote(remote_host, remote_user)
+
+        if pci_devices:
+            print("\nStep 5b: Attaching PCI devices to control plane VM...")
+            ctlplane_vm = f"{cluster_name}-ctlplane-0"
+            attach_pci_devices(
+                remote_host, remote_user, ctlplane_vm, pci_devices,
+                pre_start_hook=lambda: fix_vm_container_storage(
+                    remote_host, remote_user, cluster_name, ctlplanes),
+            )
+        else:
+            shutdown_vms(remote_host, remote_user, cluster_name, ctlplanes)
+            fix_vm_container_storage(remote_host, remote_user, cluster_name, ctlplanes)
+            start_vms(remote_host, remote_user, cluster_name, ctlplanes)
+
+        print("\nStep 6: Setting up remote cluster access...")
+        setup_remote_cluster_access(remote_host, remote_user, cluster_name, api_ip, domain)
+
+        print("\nStopping kcli monitoring (we'll monitor via remote host)...")
+        kcli_process.terminate()
+        try:
+            kcli_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            kcli_process.kill()
+
+        print(f"\nStep 7: Waiting for cluster to be ready...")
+        wait_for_cluster_ready(remote_host, remote_user, api_ip, wait_timeout)
+
+        print("\n" + "=" * 60)
+        print("CLUSTER STATUS")
+        print("=" * 60)
+        status = get_cluster_status(remote_host, remote_user)
+        print(status)
+
+        print_access_instructions(
+            host=remote_host,
+            user=remote_user,
+            cluster_name=cluster_name,
+            api_ip=api_ip,
+            domain=domain,
+            kcli_client=kcli_client,
+        )
+
+        print("\nDeployment completed successfully!")
+
+    finally:
+        if kcli_process.poll() is None:
+            kcli_process.terminate()
+            try:
+                kcli_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                kcli_process.kill()
+        kcli_log.close()
+        kcli_log_path.unlink(missing_ok=True)

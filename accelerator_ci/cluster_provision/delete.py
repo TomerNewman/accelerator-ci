@@ -1,19 +1,17 @@
-"""
-Delete OpenShift cluster using kcli.
-Supports both local and remote libvirt hosts.
-"""
+"""Delete OpenShift cluster using kcli (local or remote libvirt)."""
 
 from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Any
 
 from accelerator_ci.cluster_provision.common import run
 from accelerator_ci.cluster_provision.kcli_preflight import ensure_kcli_installed
 
 
 def delete_cluster(
-    params: dict[str, any],
+    params: dict[str, Any],
     remote_host: str | None = None,
     remote_user: str = "root",
     ssh_key: str | None = None,
@@ -31,7 +29,6 @@ def delete_cluster(
 
 
 def _delete_local(cluster_name: str) -> None:
-    """Delete OpenShift cluster locally."""
     print(f"Deleting cluster {cluster_name}...")
     run(["kcli", "delete", "cluster", cluster_name, "--yes"], check=True)
 
@@ -49,7 +46,6 @@ def _delete_remote(
     remote_user: str,
     ssh_key: str | None = None,
 ) -> None:
-    """Delete OpenShift cluster on a remote libvirt host."""
     from accelerator_ci.cluster_provision.remote import get_kcli_client_name, configure_kcli_remote_client, check_ssh_connectivity, set_ssh_key_path
 
     if ssh_key:
@@ -59,8 +55,9 @@ def _delete_remote(
     print(f"\nDeleting remote cluster: {cluster_name}")
     print(f"Remote host: {remote_user}@{remote_host}")
 
-    if not check_ssh_connectivity(remote_host, remote_user):
-        print(f"WARNING: Cannot connect to {remote_user}@{remote_host} via SSH")
+    ssh_ok, ssh_error = check_ssh_connectivity(remote_host, remote_user)
+    if not ssh_ok:
+        print(f"WARNING: Cannot connect to {remote_user}@{remote_host} via SSH: {ssh_error}")
         print("Attempting to delete using existing kcli configuration...")
 
     kcli_client = get_kcli_client_name(remote_host)

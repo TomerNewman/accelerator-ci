@@ -1,4 +1,4 @@
-"""GPU test runner utilities."""
+"""pytest runner for GPU verification tests (local and SSH-tunneled)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from accelerator_ci.shared.ssh import SSH_BASE_OPTS
 
 
 def run_tests(kubeconfig_path: str | Path, test_path: str | Path = "tests") -> int:
-    """Run GPU verification tests. Returns the pytest exit code."""
     test_dir = Path(test_path).resolve()
 
     if not test_dir.is_dir():
@@ -56,7 +55,6 @@ def run_tests_remote(
     test_path: str = "tests",
     ssh_key_path: str | None = None,
 ) -> int:
-    """Run GPU tests against a remote cluster via SSH tunnel."""
     with open(kubeconfig_path) as f:
         kc = yaml.safe_load(f)
 
@@ -114,4 +112,6 @@ def run_tests_remote(
             tunnel.wait(timeout=5)
         except subprocess.TimeoutExpired:
             tunnel.kill()
+        if tunnel.stderr:
+            tunnel.stderr.close()
         print("  SSH tunnel closed.")
