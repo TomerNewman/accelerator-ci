@@ -19,3 +19,6 @@ test = ["pytest>=8.0"]
 
 [project.scripts]
 accelerator-ci = "accelerator_ci.cluster_provision.main:cli"
+
+[project.entry-points."pytest11"]
+accelerator_ci = "accelerator_ci.testing.conftest"
