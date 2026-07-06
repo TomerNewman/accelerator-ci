@@ -51,6 +51,14 @@ class TestOperatorSpec:
         assert spec.manual_approval is True
         assert spec.all_namespaces is True
 
+    def test_manual_approval_requires_starting_csv(self):
+        with pytest.raises(ValueError, match="manual_approval requires starting_csv"):
+            OperatorSpec(
+                name="op", package="pkg", namespace="ns",
+                catalog="cat", channel="stable",
+                manual_approval=True,
+            )
+
 
 class TestVendorProfile:
     def test_cannot_instantiate_abc(self):

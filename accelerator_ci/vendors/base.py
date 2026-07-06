@@ -23,6 +23,12 @@ class OperatorSpec:
     manual_approval: bool = False
     all_namespaces: bool = False
 
+    def __post_init__(self) -> None:
+        if self.manual_approval and not self.starting_csv:
+            raise ValueError(
+                f"OperatorSpec '{self.name}': manual_approval requires starting_csv"
+            )
+
 
 class VendorProfile(ABC):
     """ABC that GPU vendors implement. Loaded via ``--vendor-module``."""
