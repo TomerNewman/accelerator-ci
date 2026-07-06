@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 @dataclass
 class OperatorSpec:
+    """A single OLM operator to install."""
+
     name: str
     package: str
     namespace: str
@@ -23,43 +25,67 @@ class OperatorSpec:
 
 
 class VendorProfile(ABC):
+    """ABC that GPU vendors implement. Loaded via ``--vendor-module``."""
+
+    # --- Abstract (must override) ---
 
     @property
     @abstractmethod
-    def display_name(self) -> str: ...
+    def display_name(self) -> str:
+        """Human-readable name for log banners (e.g. ``"AMD GPU"``)."""
+        ...
 
     @abstractmethod
-    def get_operators(self, vendor_config: dict[str, Any]) -> list[OperatorSpec]: ...
+    def get_operators(self, vendor_config: dict[str, Any]) -> list[OperatorSpec]:
+        """Ordered list of OLM operators to install.
 
-    @abstractmethod
-    def pre_operator_setup(
-        self, oc: OcRunner, vendor_config: dict[str, Any], machine_config_role: str,
-    ) -> None: ...
+        *vendor_config* is the free-form dict from the ``operators:`` config
+        section (everything except ``machine_config_role``).
+        """
+        ...
 
     @abstractmethod
     def post_operator_setup(
         self, oc: OcRunner, vendor_config: dict[str, Any], ocp_version: str | None,
-    ) -> None: ...
+    ) -> None:
+        """Vendor setup after all operators are installed (CRs, NFD rules, etc.).
+
+        Called after every CSV has reached ``Succeeded``.
+        """
+        ...
 
     @abstractmethod
-    def wait_for_gpu_ready(self, oc: OcRunner, timeout: int = 900) -> None: ...
+    def wait_for_gpu_ready(self, oc: OcRunner, timeout: int = 900) -> None:
+        """Block until GPU extended resources are visible on nodes.
 
-    @abstractmethod
-    def cleanup(self, oc: OcRunner) -> None: ...
+        Raise on failure.
+        """
+        ...
 
-    @abstractmethod
-    def get_test_path(self) -> str: ...
+    # --- Optional (sensible defaults) ---
+
+    def pre_operator_setup(
+        self, oc: OcRunner, vendor_config: dict[str, Any], machine_config_role: str,
+    ) -> None:
+        """Vendor setup before operators are installed (MachineConfigs, labels, etc.).
+
+        *machine_config_role* is ``"worker"`` or ``"master"`` (SNO).
+        """
+
+    def cleanup(self, oc: OcRunner) -> None:
+        """Reverse the operator stack installation. Called by ``cleanup`` command."""
+
+    def get_test_path(self) -> str:
+        """Path to vendor's pytest test directory. Default ``"tests"``."""
+        return "tests"
 
     def host_setup(
         self, host: str, user: str, ssh_key: str | None, vendor_config: dict[str, Any],
     ) -> None:
-        """Called before cluster deployment when --vendor-module is provided."""
+        """Host-level prep before cluster deployment (drivers, IOMMU, etc.)."""
 
     def get_pci_devices(
         self, host: str, user: str, ssh_key: str | None, vendor_config: dict[str, Any],
     ) -> list[str]:
-        """Return PCI addresses to passthrough. Merged with config pci_devices."""
+        """PCI addresses to passthrough. Merged with config ``pci_devices``."""
         return []
-
-    def resolve_operator_version(self, version: str) -> str:
-        return version

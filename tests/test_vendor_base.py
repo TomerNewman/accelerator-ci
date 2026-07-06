@@ -22,20 +22,11 @@ class FakeVendor(VendorProfile):
             ),
         ]
 
-    def pre_operator_setup(self, oc, vendor_config, machine_config_role):
-        pass
-
     def post_operator_setup(self, oc, vendor_config, ocp_version):
         pass
 
     def wait_for_gpu_ready(self, oc, timeout=900):
         pass
-
-    def cleanup(self, oc):
-        pass
-
-    def get_test_path(self) -> str:
-        return "fake/tests"
 
 
 class TestOperatorSpec:
@@ -69,7 +60,6 @@ class TestVendorProfile:
     def test_concrete_implementation(self):
         vendor = FakeVendor()
         assert vendor.display_name == "Fake GPU"
-        assert vendor.get_test_path() == "fake/tests"
 
     def test_get_operators(self):
         vendor = FakeVendor()
@@ -77,6 +67,18 @@ class TestVendorProfile:
         assert len(ops) == 1
         assert ops[0].name == "fake-operator"
         assert ops[0].namespace == "fake-ns"
+
+    def test_default_get_test_path(self):
+        vendor = FakeVendor()
+        assert vendor.get_test_path() == "tests"
+
+    def test_default_pre_operator_setup_noop(self):
+        vendor = FakeVendor()
+        assert vendor.pre_operator_setup(None, {}, "worker") is None
+
+    def test_default_cleanup_noop(self):
+        vendor = FakeVendor()
+        assert vendor.cleanup(None) is None
 
     def test_host_setup_default_noop(self):
         vendor = FakeVendor()
@@ -86,10 +88,6 @@ class TestVendorProfile:
         vendor = FakeVendor()
         assert vendor.get_pci_devices("host", "root", None, {}) == []
 
-    def test_resolve_operator_version_default(self):
-        vendor = FakeVendor()
-        assert vendor.resolve_operator_version("1.4") == "1.4"
-
     def test_incomplete_profile_raises(self):
         class Incomplete(VendorProfile):
             @property
@@ -98,3 +96,10 @@ class TestVendorProfile:
 
         with pytest.raises(TypeError):
             Incomplete()
+
+    def test_overridden_get_test_path(self):
+        class CustomPath(FakeVendor):
+            def get_test_path(self):
+                return "vendor/gpu/tests"
+
+        assert CustomPath().get_test_path() == "vendor/gpu/tests"
