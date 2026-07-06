@@ -64,5 +64,5 @@ class TestMainRequiresVendor:
             "version_channel": "stable",
         }))
 
-        with pytest.raises(SystemExit):
-            main(["--config", str(config), "operators"])
+        rc = main(["--config", str(config), "operators"])
+        assert rc == 1

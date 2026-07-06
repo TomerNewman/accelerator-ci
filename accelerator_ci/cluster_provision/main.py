@@ -30,8 +30,9 @@ def _load_vendor_profile(vendor_module: str):
     try:
         mod = importlib.import_module(vendor_module)
     except ImportError as e:
-        print(f"Error: Could not import vendor module '{vendor_module}': {e}", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError(
+            f"Could not import vendor module '{vendor_module}': {e}"
+        ) from e
 
     for attr in dir(mod):
         cls = getattr(mod, attr, None)
@@ -40,8 +41,9 @@ def _load_vendor_profile(vendor_module: str):
                 return cls()
             except TypeError:
                 continue
-    print(f"Error: No concrete VendorProfile subclass found in '{vendor_module}'", file=sys.stderr)
-    sys.exit(1)
+    raise RuntimeError(
+        f"No concrete VendorProfile subclass found in '{vendor_module}'"
+    )
 
 
 def _get_oc_runner(config):
@@ -56,13 +58,17 @@ def _get_oc_runner(config):
             user=config.remote.user,
             remote_kubeconfig=REMOTE_KUBECONFIG,
         )
-    else:
-        from accelerator_ci.shared.oc_runner import LocalOcRunner
-        kubeconfig = _kubeconfig_path(config.cluster_name)
-        if not kubeconfig.exists():
-            print(f"Error: kubeconfig not found at {kubeconfig}", file=sys.stderr)
-            sys.exit(1)
-        return LocalOcRunner(kubeconfig)
+
+    from accelerator_ci.shared.oc_runner import LocalOcRunner
+    kubeconfig = _require_kubeconfig(config.cluster_name)
+    return LocalOcRunner(kubeconfig)
+
+
+def _require_kubeconfig(cluster_name: str) -> Path:
+    kc = _kubeconfig_path(cluster_name)
+    if not kc.exists():
+        raise FileNotFoundError(f"kubeconfig not found at {kc}")
+    return kc
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -102,8 +108,7 @@ Examples:
 
 def _require_vendor(args):
     if not args.vendor_module:
-        print("Error: --vendor-module is required for this command.", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError("--vendor-module is required for this command.")
     return _load_vendor_profile(args.vendor_module)
 
 
@@ -205,10 +210,7 @@ def _dispatch(args, command: str, config) -> int:
         vendor = _require_vendor(args)
         test_path = vendor.get_test_path()
 
-        kubeconfig = _kubeconfig_path(config.cluster_name)
-        if not kubeconfig.exists():
-            print(f"Error: kubeconfig not found at {kubeconfig}", file=sys.stderr)
-            return 1
+        kubeconfig = _require_kubeconfig(config.cluster_name)
 
         if config.remote.host:
             from accelerator_ci.testing.runner import run_tests_remote
@@ -251,10 +253,7 @@ def _dispatch(args, command: str, config) -> int:
                 artifact_dir=artifact_dir,
             )
         else:
-            kubeconfig = _kubeconfig_path(config.cluster_name)
-            if not kubeconfig.exists():
-                print(f"Error: kubeconfig not found at {kubeconfig}", file=sys.stderr)
-                return 1
+            kubeconfig = _require_kubeconfig(config.cluster_name)
             return run_must_gather(kubeconfig=str(kubeconfig), artifact_dir=artifact_dir)
 
     else:
