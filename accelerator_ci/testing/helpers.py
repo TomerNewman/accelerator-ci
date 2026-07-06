@@ -84,7 +84,10 @@ def check_pending_pod_errors(
     name: str,
     namespace: str,
 ) -> None:
-    for cs in pod.status.container_statuses or []:
+    all_statuses = list(pod.status.container_statuses or [])
+    all_statuses.extend(pod.status.init_container_statuses or [])
+
+    for cs in all_statuses:
         waiting = cs.state and cs.state.waiting
         if waiting and waiting.reason in FATAL_WAITING_REASONS:
             raise RuntimeError(
