@@ -27,7 +27,6 @@ class NodeConfig:
 
 @dataclass
 class OperatorsConfig:
-    install: bool
     machine_config_role: str
     vendor_config: dict[str, Any]
 
@@ -145,7 +144,6 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
             if k not in ("install", "machine_config_role")
         }
         operators = OperatorsConfig(
-            install=operators_data.get("install", False),
             machine_config_role=operators_data.get("machine_config_role", "worker"),
             vendor_config=vendor_config,
         )

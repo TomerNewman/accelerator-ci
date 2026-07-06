@@ -37,11 +37,10 @@ vendor: ""
 must_gather:
   artifact_dir: ./must-gather-output
 
-# Post-install: install GPU operator and dependencies via OLM
-# Fields beyond install/machine_config_role are vendor-specific
-# and parsed by the corresponding vendor profile.
+# Post-deploy: GPU operator and dependencies via OLM.
+# Fields beyond machine_config_role are vendor-specific and passed as a
+# dict to the vendor profile's methods.
 operators:
-  install: false
   machine_config_role: worker   # use "master" for Single Node OpenShift (SNO)
 
   # Add vendor-specific fields here. They are passed as a dict

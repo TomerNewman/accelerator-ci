@@ -44,7 +44,7 @@ class TestParseConfig:
         assert config.ctlplanes == 1
         assert config.workers == 0
         assert config.remote.host is None
-        assert config.operators.install is False
+        assert config.operators.machine_config_role == "worker"
 
     def test_sno_topology(self):
         config = parse_config(MINIMAL_CONFIG)
@@ -85,13 +85,11 @@ class TestParseConfig:
 
     def test_vendor_config_extracted(self):
         raw = {**MINIMAL_CONFIG, "operators": {
-            "install": True,
             "machine_config_role": "worker",
             "gpu_operator_version": "1.4",
             "driver_version": "30.20.1",
         }}
         config = parse_config(raw)
-        assert config.operators.install is True
         assert config.operators.vendor_config == {
             "gpu_operator_version": "1.4",
             "driver_version": "30.20.1",
@@ -99,14 +97,22 @@ class TestParseConfig:
 
     def test_vendor_config_excludes_generic_keys(self):
         raw = {**MINIMAL_CONFIG, "operators": {
-            "install": False,
             "machine_config_role": "master",
             "custom_field": "value",
         }}
         config = parse_config(raw)
-        assert "install" not in config.operators.vendor_config
         assert "machine_config_role" not in config.operators.vendor_config
         assert config.operators.vendor_config == {"custom_field": "value"}
+
+    def test_legacy_install_flag_ignored(self):
+        """Configs with the old ``install`` key should still parse without error."""
+        raw = {**MINIMAL_CONFIG, "operators": {
+            "install": True,
+            "machine_config_role": "worker",
+        }}
+        config = parse_config(raw)
+        assert not hasattr(config.operators, "install")
+        assert "install" not in config.operators.vendor_config
 
     def test_missing_required_key_raises(self):
         raw = {**MINIMAL_CONFIG}
@@ -118,7 +124,6 @@ class TestParseConfig:
         raw = {**MINIMAL_CONFIG}
         del raw["operators"]
         config = parse_config(raw)
-        assert config.operators.install is False
         assert config.operators.machine_config_role == "worker"
 
     def test_defaults_when_must_gather_missing(self):
