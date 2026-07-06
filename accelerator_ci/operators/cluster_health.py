@@ -109,6 +109,11 @@ def wait_for_mcp_updated(
             if len(parts) < 4:
                 continue
             name, updated, updating, degraded = parts[:4]
+            if degraded == "True":
+                raise OperatorError(
+                    f"MachineConfigPool '{name}' is Degraded — rollout will not "
+                    f"complete. Check 'oc describe mcp {name}' for details."
+                )
             if updating == "True":
                 saw_updating = True
                 all_updated = False
