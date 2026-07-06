@@ -24,20 +24,13 @@ def create_operator_group(
     name: str,
     all_namespaces: bool = False,
 ) -> None:
-    if all_namespaces:
-        spec_block = "spec: {}"
-    else:
-        spec_block = f"""spec:
-  targetNamespaces:
-  - {namespace}"""
-    yaml = f"""apiVersion: operators.coreos.com/v1
-kind: OperatorGroup
-metadata:
-  name: {name}
-  namespace: {namespace}
-{spec_block}
-"""
-    oc.apply_yaml(yaml)
+    manifest: dict = {
+        "apiVersion": "operators.coreos.com/v1",
+        "kind": "OperatorGroup",
+        "metadata": {"name": name, "namespace": namespace},
+        "spec": {} if all_namespaces else {"targetNamespaces": [namespace]},
+    }
+    oc.apply_yaml(json.dumps(manifest))
 
 
 def create_subscription(
@@ -50,24 +43,22 @@ def create_subscription(
     starting_csv: str | None = None,
     manual_approval: bool = False,
 ) -> None:
-    approval = "Manual" if manual_approval else "Automatic"
-    starting_csv_block = ""
+    spec: dict = {
+        "channel": channel,
+        "installPlanApproval": "Manual" if manual_approval else "Automatic",
+        "name": package,
+        "source": catalog,
+        "sourceNamespace": "openshift-marketplace",
+    }
     if starting_csv:
-        starting_csv_block = f"\n  startingCSV: {starting_csv}"
-    yaml = f"""apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: {name}
-  namespace: {namespace}
-spec:
-  channel: {channel}
-  installPlanApproval: {approval}
-  name: {package}
-  source: {catalog}
-  sourceNamespace: openshift-marketplace
-{starting_csv_block}
-"""
-    oc.apply_yaml(yaml)
+        spec["startingCSV"] = starting_csv
+    manifest = {
+        "apiVersion": "operators.coreos.com/v1alpha1",
+        "kind": "Subscription",
+        "metadata": {"name": name, "namespace": namespace},
+        "spec": spec,
+    }
+    oc.apply_yaml(json.dumps(manifest))
 
 
 def approve_install_plan(
