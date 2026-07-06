@@ -7,10 +7,10 @@ Any GPU vendor can integrate by implementing the `VendorProfile` interface.
 ## Installation
 
 ```bash
-pip install git+https://github.com/rh-ecosystem-edge/accelerator-ci.git@main
+pip install git+https://github.com/TomerNewman/accelerator-ci.git@main
 
 # For development on accelerator-ci itself
-git clone https://github.com/rh-ecosystem-edge/accelerator-ci.git
+git clone https://github.com/TomerNewman/accelerator-ci.git
 cd accelerator-ci
 pip install -e .
 ```
@@ -55,13 +55,13 @@ Step-by-step guide for building a new vendor CI repo.
 ```bash
 mkdir my-vendor-ci && cd my-vendor-ci
 python3 -m venv .venv && source .venv/bin/activate
-pip install git+https://github.com/rh-ecosystem-edge/accelerator-ci.git@main
+pip install git+https://github.com/TomerNewman/accelerator-ci.git@main
 ```
 
 Add to `requirements.txt`:
 
 ```
-accelerator-ci @ git+https://github.com/rh-ecosystem-edge/accelerator-ci.git@main
+accelerator-ci @ git+https://github.com/TomerNewman/accelerator-ci.git@main
 ```
 
 ### 2. Create your vendor profile
