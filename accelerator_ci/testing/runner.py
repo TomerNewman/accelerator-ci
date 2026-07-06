@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from accelerator_ci.shared.ssh import SSH_BASE_OPTS
+from accelerator_ci.shared.ssh import SSH_BASE_OPTS_LIST
 
 
 def run_tests(kubeconfig_path: str | Path, test_path: str | Path = "tests") -> int:
@@ -67,16 +67,17 @@ def run_tests_remote(
         s.bind(("127.0.0.1", 0))
         local_port = s.getsockname()[1]
 
-    ssh_opts = SSH_BASE_OPTS
+    ssh_opts = list(SSH_BASE_OPTS_LIST)
     if ssh_key_path:
-        ssh_opts += f" -i {ssh_key_path}"
+        ssh_opts += ["-i", ssh_key_path]
 
-    tunnel_cmd = (
-        f"ssh {ssh_opts} -L 127.0.0.1:{local_port}:{api_host}:{api_port} "
-        f"-N {remote_user}@{remote_host}"
-    )
+    tunnel_cmd = [
+        "ssh", *ssh_opts,
+        "-L", f"127.0.0.1:{local_port}:{api_host}:{api_port}",
+        "-N", f"{remote_user}@{remote_host}",
+    ]
     print(f"  Opening SSH tunnel (local :{local_port} -> {api_host}:{api_port} via {remote_host})...")
-    tunnel = subprocess.Popen(tunnel_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    tunnel = subprocess.Popen(tunnel_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
     tunnel_ready = False
     for _ in range(30):
@@ -97,16 +98,14 @@ def run_tests_remote(
     kc["clusters"][0]["cluster"].pop("certificate-authority-data", None)
     kc["clusters"][0]["cluster"]["insecure-skip-tls-verify"] = True
 
-    tmp_kc = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".kubeconfig", prefix="gpu-test-", delete=False
-    )
-    yaml.dump(kc, tmp_kc)
-    tmp_kc.close()
-
+    fd, tmp_kc_name = tempfile.mkstemp(suffix=".kubeconfig", prefix="gpu-test-")
+    tmp_kc_path = Path(tmp_kc_name)
     try:
-        return run_tests(tmp_kc.name, test_path=test_path)
+        with os.fdopen(fd, "w") as fh:
+            yaml.dump(kc, fh)
+        return run_tests(tmp_kc_path, test_path=test_path)
     finally:
-        Path(tmp_kc.name).unlink(missing_ok=True)
+        tmp_kc_path.unlink(missing_ok=True)
         tunnel.terminate()
         try:
             tunnel.wait(timeout=5)

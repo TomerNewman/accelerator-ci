@@ -2,26 +2,26 @@
 
 from __future__ import annotations
 
-import shlex
-import stat
 import subprocess
 from pathlib import Path
 
 
 SSH_CONTROL_PATH = "/tmp/ssh-mux-%r@%h:%p"
 
-SSH_BASE_OPTS = (
-    "-o StrictHostKeyChecking=no "
-    "-o UserKnownHostsFile=/dev/null "
-    "-o LogLevel=ERROR "
-    "-o ConnectTimeout=30 "
-    "-o ServerAliveInterval=10 "
-    "-o ServerAliveCountMax=3 "
-    "-o BatchMode=yes "
-    f"-o ControlPath={SSH_CONTROL_PATH} "
-    "-o ControlMaster=auto "
-    "-o ControlPersist=600"
-)
+SSH_BASE_OPTS_LIST: list[str] = [
+    "-o", "StrictHostKeyChecking=no",
+    "-o", "UserKnownHostsFile=/dev/null",
+    "-o", "LogLevel=ERROR",
+    "-o", "ConnectTimeout=30",
+    "-o", "ServerAliveInterval=10",
+    "-o", "ServerAliveCountMax=3",
+    "-o", "BatchMode=yes",
+    "-o", f"ControlPath={SSH_CONTROL_PATH}",
+    "-o", "ControlMaster=auto",
+    "-o", "ControlPersist=600",
+]
+
+SSH_BASE_OPTS = " ".join(SSH_BASE_OPTS_LIST)
 
 ssh_key_path: str | None = None
 
@@ -43,10 +43,16 @@ def set_ssh_key_path(key_path: str | None) -> None:
     ssh_key_path = key_path
 
 
-def get_ssh_opts() -> str:
+def _ssh_opts_list() -> list[str]:
+    opts = list(SSH_BASE_OPTS_LIST)
     if ssh_key_path:
-        return f"{SSH_BASE_OPTS} -i {ssh_key_path}"
-    return SSH_BASE_OPTS
+        opts += ["-i", ssh_key_path]
+    return opts
+
+
+def get_ssh_opts() -> str:
+    """Return SSH options as a single string for callers that build shell commands."""
+    return " ".join(_ssh_opts_list())
 
 
 def ssh_cmd(
@@ -56,12 +62,10 @@ def ssh_cmd(
     check: bool = True,
     timeout: int = 300,
 ) -> subprocess.CompletedProcess:
-    ssh_opts = get_ssh_opts()
-    full_cmd = f"ssh {ssh_opts} {user}@{host} {shlex.quote(command)}"
+    cmd = ["ssh", *_ssh_opts_list(), f"{user}@{host}", command]
     try:
         return subprocess.run(
-            full_cmd,
-            shell=True,
+            cmd,
             check=check,
             capture_output=True,
             text=True,
@@ -71,11 +75,11 @@ def ssh_cmd(
         print(f"  SSH command timed out after {timeout}s: {command[:80]}")
         if check:
             raise subprocess.CalledProcessError(
-                124, full_cmd,
+                124, cmd,
                 output="", stderr=f"SSH command timed out after {timeout}s",
             )
         return subprocess.CompletedProcess(
-            args=full_cmd, returncode=1,
+            args=cmd, returncode=1,
             stdout="", stderr=f"SSH command timed out after {timeout}s",
         )
 
@@ -85,12 +89,10 @@ def scp_cmd(
     dest: str,
     timeout: int = 300,
 ) -> subprocess.CompletedProcess:
-    ssh_opts = get_ssh_opts()
-    full_cmd = f"scp {ssh_opts} {src} {dest}"
+    cmd = ["scp", *_ssh_opts_list(), src, dest]
     try:
         return subprocess.run(
-            full_cmd,
-            shell=True,
+            cmd,
             check=True,
             capture_output=True,
             text=True,
@@ -101,6 +103,5 @@ def scp_cmd(
 
 
 def close_ssh_multiplexing(host: str, user: str) -> None:
-    ssh_opts = get_ssh_opts()
-    cmd = f"ssh {ssh_opts} -O exit {user}@{host}"
-    subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
+    cmd = ["ssh", *_ssh_opts_list(), "-O", "exit", f"{user}@{host}"]
+    subprocess.run(cmd, capture_output=True, timeout=10)
