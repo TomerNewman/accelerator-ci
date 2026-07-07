@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 
-from accelerator_ci.cluster_provision.main import parse_args
+from accelerator_ci.cluster_provision.main import parse_args, _configure_logging
 
 
 class TestParseArgs:
@@ -52,6 +54,21 @@ class TestParseArgs:
         assert args.command == "test-gpu"
         assert args.junit_xml is None
 
+    def test_verbose_flag(self):
+        args = parse_args(["--config", "config.yaml", "-v", "deploy"])
+        assert args.verbose is True
+        assert args.quiet is False
+
+    def test_quiet_flag(self):
+        args = parse_args(["--config", "config.yaml", "--quiet", "deploy"])
+        assert args.quiet is True
+        assert args.verbose is False
+
+    def test_default_verbosity(self):
+        args = parse_args(["--config", "config.yaml", "deploy"])
+        assert args.verbose is False
+        assert args.quiet is False
+
 
 class TestMainRequiresVendor:
     def test_operators_without_vendor_module(self, tmp_path):
@@ -79,3 +96,33 @@ class TestMainRequiresVendor:
 
         rc = main(["--config", str(config), "operators"])
         assert rc == 1
+
+
+class TestConfigureLogging:
+    def _reset_logging(self):
+        root = logging.getLogger()
+        for handler in root.handlers[:]:
+            root.removeHandler(handler)
+        root.setLevel(logging.WARNING)
+
+    def setup_method(self):
+        self._reset_logging()
+
+    def teardown_method(self):
+        self._reset_logging()
+
+    def test_default_level_is_info(self):
+        _configure_logging()
+        assert logging.getLogger().level == logging.INFO
+
+    def test_verbose_sets_debug(self):
+        _configure_logging(verbose=True)
+        assert logging.getLogger().level == logging.DEBUG
+
+    def test_quiet_sets_warning(self):
+        _configure_logging(quiet=True)
+        assert logging.getLogger().level == logging.WARNING
+
+    def test_verbose_wins_over_quiet(self):
+        _configure_logging(verbose=True, quiet=True)
+        assert logging.getLogger().level == logging.DEBUG

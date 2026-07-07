@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import re
 import subprocess
@@ -18,6 +19,8 @@ from accelerator_ci.shared.ssh import (
     ssh_cmd,
     scp_cmd,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def check_ssh_connectivity(host: str, user: str) -> tuple[bool, str]:
@@ -40,43 +43,43 @@ def check_ssh_connectivity(host: str, user: str) -> tuple[bool, str]:
 
 def setup_remote_libvirt(host: str, user: str) -> None:
     """Set up libvirt and prerequisites on the remote host (idempotent)."""
-    print(f"Setting up remote host: {user}@{host}")
+    logger.info("Setting up remote host: %s@%s", user, host)
 
     ssh_success, ssh_error = check_ssh_connectivity(host, user)
     if not ssh_success:
         raise DeployError(f"Cannot SSH to {user}@{host}: {ssh_error}")
-    print("  SSH connection verified.")
+    logger.info("SSH connection verified.")
 
     result = ssh_cmd(host, user, "command -v virsh", check=False)
     if result.returncode != 0:
-        print("  libvirt not found. Installing per kcli prerequisites...")
+        logger.info("libvirt not found. Installing per kcli prerequisites...")
 
         dnf_check = ssh_cmd(host, user, "command -v dnf", check=False)
         yum_check = ssh_cmd(host, user, "command -v yum", check=False)
         apt_check = ssh_cmd(host, user, "command -v apt-get", check=False)
 
         if dnf_check.returncode == 0:
-            print("  Using dnf to install libvirt (RHEL/Fedora)...")
+            logger.info("Using dnf to install libvirt (RHEL/Fedora)...")
             ssh_cmd(host, user, "dnf -y install libvirt libvirt-daemon-driver-qemu qemu-kvm tar")
         elif yum_check.returncode == 0:
-            print("  Using yum to install libvirt (CentOS/older RHEL)...")
+            logger.info("Using yum to install libvirt (CentOS/older RHEL)...")
             ssh_cmd(host, user, "yum -y install libvirt libvirt-daemon-driver-qemu qemu-kvm tar")
         elif apt_check.returncode == 0:
-            print("  Using apt-get to install libvirt (Debian/Ubuntu)...")
+            logger.info("Using apt-get to install libvirt (Debian/Ubuntu)...")
             ssh_cmd(host, user, "apt-get update && apt-get install -y libvirt-daemon-system libvirt-clients qemu-kvm")
         else:
             raise DeployError("No supported package manager found on remote host (dnf/yum/apt-get)")
 
         ssh_cmd(host, user, "usermod -aG qemu,libvirt $(id -un)", check=False)
         ssh_cmd(host, user, "systemctl enable --now libvirtd")
-        print("  libvirt installed successfully.")
+        logger.info("libvirt installed successfully.")
     else:
-        print("  libvirt is already installed.")
+        logger.info("libvirt is already installed.")
 
-    print("  Fixing libvirt token permissions...")
+    logger.debug("Fixing libvirt token permissions...")
     ssh_cmd(host, user, "rm -rf /run/libvirt/common && systemctl restart virtlogd libvirtd", check=False)
 
-    print("  Enabling modular libvirt daemons...")
+    logger.debug("Enabling modular libvirt daemons...")
     ssh_cmd(
         host, user,
         "for svc in virtqemud virtstoraged virtnetworkd virtnodedevd virtsecretd virtinterfaced virtnwfilterd; do "
@@ -87,7 +90,7 @@ def setup_remote_libvirt(host: str, user: str) -> None:
         check=False
     )
 
-    print("  Checking/creating default storage pool...")
+    logger.info("Checking/creating default storage pool...")
     pool_check = ssh_cmd(host, user, "virsh -c qemu:///system pool-info default", check=False)
     if pool_check.returncode != 0:
         ssh_cmd(host, user, "mkdir -p /var/lib/libvirt/images")
@@ -98,33 +101,33 @@ def setup_remote_libvirt(host: str, user: str) -> None:
         )
         if define_result.returncode != 0 and "already exists" not in define_result.stderr.lower():
             raise DeployError(f"Failed to define storage pool: {define_result.stderr}")
-        print("  Default storage pool defined.")
+        logger.info("Default storage pool defined.")
     else:
-        print("  Default storage pool already exists.")
+        logger.info("Default storage pool already exists.")
 
     start_result = ssh_cmd(host, user, "virsh -c qemu:///system pool-start default", check=False)
     if start_result.returncode != 0 and "already active" not in start_result.stderr.lower():
         raise DeployError(f"Failed to start storage pool: {start_result.stderr}")
 
     ssh_cmd(host, user, "virsh -c qemu:///system pool-autostart default", check=False)
-    print("  Storage pool ready.")
+    logger.info("Storage pool ready.")
 
     result = ssh_cmd(host, user, "virsh -c qemu:///system list --all", check=False)
     if result.returncode != 0:
         raise DeployError("libvirt is not working on the remote host after setup")
 
-    print("  Ensuring oc client is installed...")
+    logger.info("Ensuring oc client is installed...")
     oc_check = ssh_cmd(host, user, "command -v oc", check=False)
     if oc_check.returncode != 0:
         ssh_cmd(
             host, user,
             "curl -sL https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/stable/openshift-client-linux.tar.gz | tar xzf - -C /usr/local/bin oc kubectl"
         )
-        print("  oc client installed.")
+        logger.info("oc client installed.")
     else:
-        print("  oc client already installed.")
+        logger.info("oc client already installed.")
 
-    print(f"Remote host {host} setup complete!")
+    logger.info("Remote host %s setup complete!", host)
 
 
 def get_kcli_client_name(host: str) -> str:
@@ -160,7 +163,7 @@ def _create_ssh_config(host: str, user: str, key_path: str) -> None:
         ssh_config_file.write_text(ssh_config_content)
 
     ssh_config_file.chmod(0o600)
-    print(f"  Created SSH config entry for {host}")
+    logger.debug("Created SSH config entry for %s", host)
 
 
 def _create_ssh_wrapper(key_path: str) -> None:
@@ -172,11 +175,11 @@ def _create_ssh_wrapper(key_path: str) -> None:
     key_content = Path(key_path).read_bytes()
     default_key.write_bytes(key_content)
     default_key.chmod(0o600)
-    print(f"  Copied SSH key to {default_key}")
+    logger.debug("Copied SSH key to %s", default_key)
 
     pub_key = ssh_dir / "id_rsa.pub"
     if not pub_key.exists():
-        print(f"  Generating public key: {pub_key}")
+        logger.debug("Generating public key: %s", pub_key)
         result = subprocess.run(
             ["ssh-keygen", "-y", "-f", str(default_key)],
             capture_output=True,
@@ -187,7 +190,7 @@ def _create_ssh_wrapper(key_path: str) -> None:
         pub_key.chmod(0o644)
 
     if not os.environ.get("SSH_AUTH_SOCK"):
-        print("  Starting ssh-agent...")
+        logger.debug("Starting ssh-agent...")
         result = subprocess.run(
             ["ssh-agent", "-s"],
             capture_output=True,
@@ -202,18 +205,18 @@ def _create_ssh_wrapper(key_path: str) -> None:
                     key = key.strip()
                     value = value.strip()
                     os.environ[key] = value
-                    print(f"    Set {key}")
+                    logger.debug("Set %s", key)
     else:
-        print(f"  Using existing ssh-agent: {os.environ['SSH_AUTH_SOCK']}")
+        logger.debug("Using existing ssh-agent: %s", os.environ['SSH_AUTH_SOCK'])
 
-    print("  Adding SSH key to ssh-agent")
+    logger.debug("Adding SSH key to ssh-agent")
     subprocess.run(
         ["ssh-add", str(default_key)],
         capture_output=True,
         text=True,
         check=True
     )
-    print("    SSH key added to agent")
+    logger.debug("SSH key added to agent")
 
 
 def configure_kcli_remote_client(host: str, user: str) -> str:
@@ -247,19 +250,19 @@ def configure_kcli_remote_client(host: str, user: str) -> str:
     if client_name.isdigit():
         yaml_content = yaml_content.replace(f"{client_name}:", f"'{client_name}':")
     config_file.write_text(yaml_content)
-    print(f"kcli client '{client_name}' configured for {user}@{host}")
+    logger.info("kcli client '%s' configured for %s@%s", client_name, user, host)
 
     if _ssh_mod.ssh_key_path:
         if Path(_ssh_mod.ssh_key_path).is_absolute():
             abs_key_path = _ssh_mod.ssh_key_path
         else:
             abs_key_path = str(Path(_ssh_mod.ssh_key_path).absolute())
-        print(f"Configuring SSH wrapper for kcli to use key: {abs_key_path}")
+        logger.debug("Configuring SSH wrapper for kcli to use key: %s", abs_key_path)
 
         _create_ssh_config(host, user, abs_key_path)
         _create_ssh_wrapper(abs_key_path)
 
-    print(f"Verifying kcli connection to {host}...")
+    logger.info("Verifying kcli connection to %s...", host)
     result = run(["kcli", "-C", client_name, "list", "vm"], check=False, capture_output=True)
     if result.returncode != 0:
         error_msg = f"kcli cannot connect to remote host '{client_name}'.\n"
@@ -268,7 +271,7 @@ def configure_kcli_remote_client(host: str, user: str) -> str:
         error_msg += f"\nDebug: Try manually:\n  ssh {host} 'echo test'\n  kcli -C {client_name} list vm"
         raise DeployError(error_msg)
 
-    print("  kcli connection verified")
+    logger.info("kcli connection verified")
     return client_name
 
 
@@ -286,7 +289,7 @@ def setup_remote_cluster_access(
     while not kubeconfig_path.exists():
         if time.time() - start > timeout:
             raise DeployError(f"Timeout waiting for kubeconfig at {kubeconfig_path}")
-        print(f"  Waiting for kubeconfig... ({int(time.time() - start)}s)")
+        logger.info("Waiting for kubeconfig... (%ds)", int(time.time() - start))
         time.sleep(5)
 
     scp_cmd(str(kubeconfig_path), f"{user}@{host}:/root/kubeconfig")
@@ -297,7 +300,7 @@ def setup_remote_cluster_access(
         f"grep -q '{api_hostname}' /etc/hosts || echo '{api_ip} {api_hostname}' >> /etc/hosts",
         check=False
     )
-    print("  Remote host configured for cluster access.")
+    logger.info("Remote host configured for cluster access.")
 
 
 def wait_for_cluster_ready(
@@ -306,7 +309,7 @@ def wait_for_cluster_ready(
     api_ip: str,
     timeout: int = 3600,
 ) -> bool:
-    print(f"Waiting for cluster to be ready (timeout: {timeout}s)...")
+    logger.info("Waiting for cluster to be ready (timeout: %ds)...", timeout)
 
     start_time = time.time()
     api_ready = False
@@ -320,10 +323,10 @@ def wait_for_cluster_ready(
         if not api_ready:
             result = ssh_cmd(host, user, f"curl -sk https://{api_ip}:6443/version", check=False)
             if "gitVersion" in result.stdout:
-                print(f"  Kubernetes API is responding! ({elapsed}s)")
+                logger.info("Kubernetes API is responding! (%ds)", elapsed)
                 api_ready = True
             else:
-                print(f"  Waiting for Kubernetes API... ({elapsed}s)")
+                logger.info("Waiting for Kubernetes API... (%ds)", elapsed)
                 time.sleep(30)
                 continue
 
@@ -343,9 +346,7 @@ def wait_for_cluster_ready(
                 cv_progressing = parts[3]
 
         if cv_available == "True" and cv_progressing == "False":
-            print(f"\n{'='*50}")
-            print("SUCCESS! Cluster is ready!")
-            print(f"{'='*50}")
+            logger.info("%s\nSUCCESS! Cluster is ready!\n%s", "=" * 50, "=" * 50)
             return True
 
         node_status = ssh_cmd(
@@ -354,9 +355,10 @@ def wait_for_cluster_ready(
             check=False
         ).stdout.strip()
 
-        print(f"  Cluster status: Available={cv_available or 'Unknown'}, Progressing={cv_progressing or 'Unknown'} ({elapsed}s)")
+        logger.info("Cluster status: Available=%s, Progressing=%s (%ds)",
+                     cv_available or 'Unknown', cv_progressing or 'Unknown', elapsed)
         if node_status:
-            print(f"  Node: {node_status}")
+            logger.info("Node: %s", node_status)
 
         time.sleep(30)
 
@@ -388,29 +390,26 @@ def print_access_instructions(
     if password_file.exists():
         password = password_file.read_text().strip()
 
-    print(f"""
-{'='*60}
-ACCESS INSTRUCTIONS
-{'='*60}
-
-Kubeconfig (local): {kubeconfig_path / 'kubeconfig'}
-Kubeconfig (remote): /root/kubeconfig on {host}
-Kubeadmin password: {password}
-
-To run oc commands via remote host:
-  ssh {user}@{host} 'export KUBECONFIG=/root/kubeconfig; oc get nodes'
-
-To access from your local machine, set up an SSH tunnel:
-  ssh -L 6443:{api_ip}:6443 -L 443:{api_ip}:443 {user}@{host} -N &
-  echo '127.0.0.1 api.{cluster_name}.{domain}' | sudo tee -a /etc/hosts
-  export KUBECONFIG={kubeconfig_path / 'kubeconfig'}
-  oc get nodes
-
-{'='*60}
-To delete the cluster:
-  kcli -C {kcli_client} delete cluster {cluster_name} -y
-{'='*60}
-""")
+    msg = (
+        f"\n{'=' * 60}\n"
+        f"ACCESS INSTRUCTIONS\n"
+        f"{'=' * 60}\n\n"
+        f"Kubeconfig (local): {kubeconfig_path / 'kubeconfig'}\n"
+        f"Kubeconfig (remote): /root/kubeconfig on {host}\n"
+        f"Kubeadmin password: {password}\n\n"
+        f"To run oc commands via remote host:\n"
+        f"  ssh {user}@{host} 'export KUBECONFIG=/root/kubeconfig; oc get nodes'\n\n"
+        f"To access from your local machine, set up an SSH tunnel:\n"
+        f"  ssh -L 6443:{api_ip}:6443 -L 443:{api_ip}:443 {user}@{host} -N &\n"
+        f"  echo '127.0.0.1 api.{cluster_name}.{domain}' | sudo tee -a /etc/hosts\n"
+        f"  export KUBECONFIG={kubeconfig_path / 'kubeconfig'}\n"
+        f"  oc get nodes\n\n"
+        f"{'=' * 60}\n"
+        f"To delete the cluster:\n"
+        f"  kcli -C {kcli_client} delete cluster {cluster_name} -y\n"
+        f"{'=' * 60}"
+    )
+    logger.info("%s", msg)
 
 
 def attach_pci_devices(
@@ -421,7 +420,7 @@ def attach_pci_devices(
     pre_start_hook: Optional[Callable[[], None]] = None,
 ) -> None:
     """Shut down VM, attach PCI devices for GPU passthrough, then restart."""
-    print(f"Attaching {len(pci_devices)} PCI device(s) to VM '{vm_name}'...")
+    logger.info("Attaching %d PCI device(s) to VM '%s'...", len(pci_devices), vm_name)
 
     vm_state = ssh_cmd(host, user, f"virsh domstate {vm_name}", check=False)
     if vm_state.returncode != 0 or "no state" in vm_state.stderr.lower():
@@ -430,22 +429,22 @@ def attach_pci_devices(
     was_running = "running" in vm_state.stdout.lower()
 
     if was_running:
-        print(f"  Shutting down VM '{vm_name}'...")
+        logger.info("Shutting down VM '%s'...", vm_name)
         ssh_cmd(host, user, f"virsh shutdown {vm_name}", check=False)
 
         for i in range(24):
             time.sleep(5)
             state = ssh_cmd(host, user, f"virsh domstate {vm_name}", check=False)
             if "shut off" in state.stdout.lower():
-                print("  VM shut down successfully.")
+                logger.info("VM shut down successfully.")
                 break
             if i == 23:
-                print("  Force stopping VM...")
+                logger.warning("Force stopping VM...")
                 ssh_cmd(host, user, f"virsh destroy {vm_name}", check=False)
                 time.sleep(2)
 
     for pci_addr in pci_devices:
-        print(f"  Attaching PCI device: {pci_addr}")
+        logger.info("Attaching PCI device: %s", pci_addr)
 
         parts = pci_addr.replace(":", " ").replace(".", " ").split()
         if len(parts) != 4:
@@ -473,23 +472,23 @@ def attach_pci_devices(
         result = ssh_cmd(host, user, f"virsh attach-device {vm_name} {xml_file} --config", check=False)
         if result.returncode != 0:
             if "already exists" in result.stderr.lower() or "already attached" in result.stderr.lower():
-                print(f"    Device {pci_addr} already attached.")
+                logger.info("Device %s already attached.", pci_addr)
             else:
                 raise DeployError(f"Failed to attach PCI device {pci_addr}: {result.stderr}")
         else:
-            print(f"    Device {pci_addr} attached.")
+            logger.info("Device %s attached.", pci_addr)
 
         ssh_cmd(host, user, f"rm -f {xml_file}", check=False)
 
-    print("  Verifying PCI devices in VM config...")
+    logger.info("Verifying PCI devices in VM config...")
     result = ssh_cmd(host, user, f"virsh dumpxml {vm_name} | grep -c hostdev", check=False)
     hostdev_count = int(result.stdout.strip()) if result.stdout.strip().isdigit() else 0
-    print(f"    Found {hostdev_count} hostdev entries in VM config.")
+    logger.info("Found %d hostdev entries in VM config.", hostdev_count)
 
     if pre_start_hook:
         pre_start_hook()
 
-    print(f"  Starting VM '{vm_name}'...")
+    logger.info("Starting VM '%s'...", vm_name)
     ssh_cmd(host, user, f"virsh start {vm_name}", check=True)
 
     vm_started = False
@@ -497,11 +496,11 @@ def attach_pci_devices(
         time.sleep(5)
         state = ssh_cmd(host, user, f"virsh domstate {vm_name}", check=False)
         if "running" in state.stdout.lower():
-            print(f"  VM '{vm_name}' is running with PCI passthrough enabled.")
+            logger.info("VM '%s' is running with PCI passthrough enabled.", vm_name)
             vm_started = True
             break
 
     if not vm_started:
         raise DeployError(f"VM '{vm_name}' failed to start after PCI device attachment.")
 
-    print("PCI device attachment complete.")
+    logger.info("PCI device attachment complete.")

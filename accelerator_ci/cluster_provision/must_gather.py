@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -9,6 +10,8 @@ from pathlib import Path
 
 from accelerator_ci.shared.ssh import ssh_cmd, scp_cmd, get_ssh_opts, close_ssh_multiplexing
 from accelerator_ci.shared.oc_runner import REMOTE_KUBECONFIG
+
+logger = logging.getLogger(__name__)
 
 MUST_GATHER_SCRIPT = Path(__file__).resolve().parent.parent.parent / "scripts" / "must-gather.sh"
 
@@ -30,14 +33,14 @@ def run_must_gather_remote(host: str, user: str, artifact_dir: str) -> int:
             host, user, "mktemp -d /tmp/must-gather-XXXXXXXX", check=False, timeout=30,
         )
         if mktemp_result.returncode != 0:
-            print(f"[must-gather] Failed to create remote temp dir: {mktemp_result.stderr}")
+            logger.error("Failed to create remote temp dir: %s", mktemp_result.stderr)
             return 1
         remote_workdir = mktemp_result.stdout.strip()
 
         remote_script = f"{remote_workdir}/must-gather.sh"
         remote_artifact_dir = f"{remote_workdir}/output"
 
-        print(f"[must-gather] Copying script to {user}@{host}:{remote_script}")
+        logger.info("Copying script to %s@%s:%s", user, host, remote_script)
         scp_cmd(str(MUST_GATHER_SCRIPT), f"{user}@{host}:{remote_script}")
 
         remote_cmd = (
@@ -47,19 +50,19 @@ def run_must_gather_remote(host: str, user: str, artifact_dir: str) -> int:
             f"{remote_script}"
         )
 
-        print(f"[must-gather] Running must-gather on {host}")
+        logger.info("Running must-gather on %s", host)
         result = ssh_cmd(host, user, remote_cmd, check=False, timeout=MUST_GATHER_TIMEOUT)
         sys.stdout.write(result.stdout)
         sys.stderr.write(result.stderr)
 
         if result.returncode != 0:
-            print(f"[must-gather] Remote script failed with exit code {result.returncode}")
+            logger.error("Remote script failed with exit code %d", result.returncode)
             return result.returncode
 
         local_artifact = Path(artifact_dir)
         local_artifact.mkdir(parents=True, exist_ok=True)
 
-        print(f"[must-gather] Copying results from {host} to {artifact_dir}")
+        logger.info("Copying results from %s to %s", host, artifact_dir)
         ssh_opts = get_ssh_opts()
         tar_pipeline = [
             "ssh", *ssh_opts.split(), f"{user}@{host}",
@@ -78,17 +81,17 @@ def run_must_gather_remote(host: str, user: str, artifact_dir: str) -> int:
             extract_proc.kill()
             ssh_proc.wait()
             extract_proc.wait()
-            print("[must-gather] Warning: tar pipeline timed out")
+            logger.warning("tar pipeline timed out")
             return 1
         finally:
             if ssh_proc.stderr:
                 ssh_proc.stderr.close()
 
         if ssh_proc.returncode != 0 or extract_proc.returncode != 0:
-            print(f"[must-gather] Warning: failed to copy results back: {extract_err.decode()}")
+            logger.warning("Failed to copy results back: %s", extract_err.decode())
             return 1
 
-        print(f"[must-gather] Results saved to {artifact_dir}")
+        logger.info("Results saved to %s", artifact_dir)
         return 0
 
     finally:

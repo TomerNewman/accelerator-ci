@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
 from accelerator_ci.operators.errors import OperatorError
 from accelerator_ci.shared.oc_runner import OcRunner
+
+logger = logging.getLogger(__name__)
 
 
 def wait_for_cluster_stability(
@@ -14,7 +17,7 @@ def wait_for_cluster_stability(
     poll_interval: int = 20,
 ) -> None:
     """Tolerates temporary API unavailability during SNO reboots."""
-    print("Waiting for cluster stability...")
+    logger.info("Waiting for cluster stability...")
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         elapsed = int(time.monotonic() - start)
@@ -28,7 +31,7 @@ def wait_for_cluster_stability(
             timeout=15,
         )
         if r.returncode != 0:
-            print(f"  API not reachable ({elapsed}s)...")
+            logger.info("API not reachable (%ds)...", elapsed)
             time.sleep(poll_interval)
             continue
         for line in (r.stdout or "").strip().splitlines():
@@ -46,7 +49,7 @@ def wait_for_cluster_stability(
             timeout=15,
         )
         if r.returncode != 0:
-            print(f"  Cannot check ClusterOperators ({elapsed}s)...")
+            logger.info("Cannot check ClusterOperators (%ds)...", elapsed)
             time.sleep(poll_interval)
             continue
         for line in (r.stdout or "").strip().splitlines():
@@ -62,13 +65,13 @@ def wait_for_cluster_stability(
                 issues.append(f"CO '{name}' is Degraded")
 
         if not issues:
-            print("  Cluster is stable (all nodes Ready, all ClusterOperators healthy).")
+            logger.info("Cluster is stable (all nodes Ready, all ClusterOperators healthy).")
             return
 
         summary = "; ".join(issues[:3])
         if len(issues) > 3:
             summary += f" (+{len(issues) - 3} more)"
-        print(f"  {summary} ({elapsed}s)...")
+        logger.info("%s (%ds)...", summary, elapsed)
         time.sleep(poll_interval)
 
     raise OperatorError(
@@ -83,7 +86,7 @@ def wait_for_mcp_updated(
     poll_interval: int = 20,
 ) -> None:
     """Tolerates API downtime during SNO reboots from MachineConfig changes."""
-    print("Waiting for MachineConfigPool to finish updating...")
+    logger.info("Waiting for MachineConfigPool to finish updating...")
     start = time.monotonic()
     saw_updating = False
     while time.monotonic() - start < timeout:
@@ -99,7 +102,7 @@ def wait_for_mcp_updated(
         )
         if r.returncode != 0:
             saw_updating = True
-            print(f"  API not reachable (node likely rebooting) ({elapsed}s)...")
+            logger.info("API not reachable (node likely rebooting) (%ds)...", elapsed)
             time.sleep(poll_interval)
             continue
 
@@ -117,20 +120,20 @@ def wait_for_mcp_updated(
             if updating == "True":
                 saw_updating = True
                 all_updated = False
-                print(f"  MCP '{name}' is still updating ({elapsed}s)...")
+                logger.info("MCP '%s' is still updating (%ds)...", name, elapsed)
             elif updated != "True":
                 all_updated = False
-                print(f"  MCP '{name}' not yet updated ({elapsed}s)...")
+                logger.info("MCP '%s' not yet updated (%ds)...", name, elapsed)
 
         if all_updated and (r.stdout or "").strip():
             if saw_updating:
-                print("  All MachineConfigPools updated, reboot complete.")
+                logger.info("All MachineConfigPools updated, reboot complete.")
             else:
                 if elapsed < 60:
-                    print(f"  MCP shows updated but MCO may not have started yet ({elapsed}s)...")
+                    logger.debug("MCP shows updated but MCO may not have started yet (%ds)...", elapsed)
                     time.sleep(poll_interval)
                     continue
-                print("  All MachineConfigPools updated (MCO may have been fast).")
+                logger.info("All MachineConfigPools updated (MCO may have been fast).")
             return
 
         time.sleep(poll_interval)

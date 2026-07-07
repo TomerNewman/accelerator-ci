@@ -1,6 +1,9 @@
+import logging
 import shutil
 from pathlib import Path
 from accelerator_ci.cluster_provision.common import DeployError, run
+
+logger = logging.getLogger(__name__)
 
 def ensure_kcli_installed() -> None:
     if shutil.which("kcli") is None:
@@ -17,5 +20,5 @@ def ensure_kcli_config() -> None:
 
     config_file = kcli_dir / "config.yml"
     if not config_file.is_file():
-        print("No ~/.kcli/config.yml found. Creating a default local kvm client...")
+        logger.info("No ~/.kcli/config.yml found. Creating a default local kvm client...")
         run(["kcli", "create", "host", "kvm", "-H", "127.0.0.1", "local"])

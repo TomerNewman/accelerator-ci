@@ -1,9 +1,12 @@
 import json
+import logging
 import re
 import urllib.error
 import urllib.request
 from accelerator_ci.cluster_provision.common import DeployError
 from semver import Version
+
+logger = logging.getLogger(__name__)
 
 RELEASES_API_URL = "https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted"
 
@@ -15,7 +18,7 @@ def get_latest_ocp_version(version_tag: str, channel_name: str = "stable") -> st
     if channel_name != "stable":
         raise ValueError(f"Channel '{channel_name}' is not supported. Only 'stable' is currently supported.")
 
-    print(f"Checking for latest OCP version for {version_tag} in {channel_name} stream...")
+    logger.info("Checking for latest OCP version for %s in %s stream...", version_tag, channel_name)
 
     try:
         req = urllib.request.Request(RELEASES_API_URL, headers={'User-Agent': 'Mozilla/5.0'})

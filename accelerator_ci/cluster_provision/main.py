@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import logging
 import os
 import subprocess
 import sys
@@ -18,6 +19,8 @@ from accelerator_ci.cluster_provision.config import (
 from accelerator_ci.cluster_provision.params import update_version_to_latest_patch
 from accelerator_ci.cluster_provision.deploy import deploy_cluster
 from accelerator_ci.cluster_provision.delete import delete_cluster
+
+logger = logging.getLogger(__name__)
 
 
 def _kubeconfig_path(cluster_name: str) -> Path:
@@ -94,6 +97,16 @@ Examples:
         help="Python module path to VendorProfile (e.g. 'my_vendor.profile'). "
              "Required for operators, test-gpu, and cleanup commands.",
     )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose (DEBUG) logging.",
+    )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress informational output (WARNING and above only).",
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="Action to perform")
     subparsers.add_parser("deploy", help="Deploy the OpenShift cluster")
@@ -119,23 +132,40 @@ def _require_vendor(args):
     return _load_vendor_profile(args.vendor_module)
 
 
+def _configure_logging(verbose: bool = False, quiet: bool = False) -> None:
+    if verbose:
+        level = logging.DEBUG
+        fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    elif quiet:
+        level = logging.WARNING
+        fmt = "%(levelname)s: %(message)s"
+    else:
+        level = logging.INFO
+        fmt = "%(message)s"
+
+    logging.basicConfig(level=level, format=fmt, stream=sys.stdout, force=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+
+    _configure_logging(verbose=args.verbose, quiet=args.quiet)
+
     command = args.command
     if not command:
-        print("Error: no command specified. Use one of: deploy, delete, operators, test-gpu, cleanup, must-gather", file=sys.stderr)
+        logger.error("Error: no command specified. Use one of: deploy, delete, operators, test-gpu, cleanup, must-gather")
         return 1
 
     try:
         config = load_cluster_config(args.config_file)
     except (FileNotFoundError, KeyError) as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error("Error: %s", e)
         return 1
 
     try:
         return _dispatch(args, command, config)
     except (RuntimeError, OSError, subprocess.CalledProcessError) as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error("Error: %s", e)
         return 1
 
 
@@ -157,14 +187,14 @@ def _dispatch(args, command: str, config) -> int:
             extra_devices = vendor.get_pci_devices(**host_args)
             if extra_devices:
                 pci_devices.extend(extra_devices)
-                print(f"Vendor provided {len(extra_devices)} PCI device(s): {extra_devices}")
+                logger.info("Vendor provided %d PCI device(s): %s", len(extra_devices), extra_devices)
 
         params = get_kcli_params(config, ocp_version)
 
         print_config(params)
         if pci_devices:
-            print(f"PCI Passthrough Devices: {pci_devices}")
-        print(f"Config file: {args.config_file}")
+            logger.info("PCI Passthrough Devices: %s", pci_devices)
+        logger.info("Config file: %s", args.config_file)
 
         deploy_cluster(
             params=params,
@@ -180,7 +210,7 @@ def _dispatch(args, command: str, config) -> int:
             artifact_path = Path(artifact_dir)
             artifact_path.mkdir(parents=True, exist_ok=True)
             (artifact_path / "ocp.version").write_text(ocp_version)
-            print(f"Wrote ocp.version: {ocp_version}")
+            logger.info("Wrote ocp.version: %s", ocp_version)
 
     elif command == "delete":
         params = {"cluster": config.cluster_name}
@@ -266,7 +296,7 @@ def _dispatch(args, command: str, config) -> int:
             return run_must_gather(kubeconfig=str(kubeconfig), artifact_dir=artifact_dir)
 
     else:
-        print(f"Unknown command: {command}", file=sys.stderr)
+        logger.error("Unknown command: %s", command)
         return 1
     return 0
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, TYPE_CHECKING
 
 from accelerator_ci.operators.cluster_health import wait_for_cluster_stability, wait_for_mcp_updated
@@ -18,6 +19,8 @@ from accelerator_ci.operators.prerequisites import configure_internal_registry, 
 if TYPE_CHECKING:
     from accelerator_ci.shared.oc_runner import OcRunner
     from accelerator_ci.vendors.base import VendorProfile
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_TIMEOUTS = {
@@ -40,9 +43,7 @@ def install_operators(
     """Use machine_config_role="master" for SNO."""
     t = {**DEFAULT_TIMEOUTS, **(timeouts or {})}
 
-    print("\n" + "=" * 60)
-    print(f"{vendor.display_name} Installation (OLM)")
-    print("=" * 60)
+    logger.info("%s\n%s Installation (OLM)\n%s", "=" * 60, vendor.display_name, "=" * 60)
 
     verify_required_operators(oc, timeout=t["prerequisite"])
     configure_internal_registry(oc, timeout=t["registry"])
@@ -54,7 +55,7 @@ def install_operators(
 
     ops = vendor.get_operators(vendor_config)
     for op in ops:
-        print(f"Installing operator: {op.name} in {op.namespace}...")
+        logger.info("Installing operator: %s in %s...", op.name, op.namespace)
         ensure_namespace(oc, op.namespace)
         create_operator_group(oc, op.namespace, op.name, all_namespaces=op.all_namespaces)
         create_subscription(
@@ -72,27 +73,21 @@ def install_operators(
             wait_for_csv_by_name(oc, op.namespace, op.starting_csv, timeout=t["operator"])
         else:
             wait_for_csv(oc, op.namespace, timeout=t["operator"])
-        print(f"  {op.name} installed.")
+        logger.info("%s installed.", op.name)
 
     vendor.post_operator_setup(oc, vendor_config, ocp_version)
     wait_for_cluster_stability(oc, timeout=t["cluster_stability"])
     vendor.wait_for_gpu_ready(oc, timeout=t["gpu_ready"])
 
-    print("\n" + "=" * 60)
-    print(f"{vendor.display_name} installation completed successfully.")
-    print("=" * 60)
+    logger.info("%s\n%s installation completed successfully.\n%s", "=" * 60, vendor.display_name, "=" * 60)
 
 
 def cleanup_operators(
     oc: OcRunner,
     vendor: VendorProfile,
 ) -> None:
-    print("\n" + "=" * 60)
-    print(f"{vendor.display_name} Cleanup")
-    print("=" * 60)
+    logger.info("%s\n%s Cleanup\n%s", "=" * 60, vendor.display_name, "=" * 60)
 
     vendor.cleanup(oc)
 
-    print("\n" + "=" * 60)
-    print(f"{vendor.display_name} cleanup completed.")
-    print("=" * 60)
+    logger.info("%s\n%s cleanup completed.\n%s", "=" * 60, vendor.display_name, "=" * 60)

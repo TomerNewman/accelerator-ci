@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 SSH_CONTROL_PATH = "/tmp/ssh-mux-%r@%h:%p"
@@ -37,7 +40,7 @@ def set_ssh_key_path(key_path: str | None) -> None:
 
         current_mode = key_file.stat().st_mode
         if current_mode & 0o777 != 0o600:
-            print(f"Fixing SSH key permissions: {key_path} (chmod 600)")
+            logger.debug("Fixing SSH key permissions: %s (chmod 600)", key_path)
             key_file.chmod(0o600)
 
     ssh_key_path = key_path
@@ -72,7 +75,7 @@ def ssh_cmd(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        print(f"  SSH command timed out after {timeout}s: {command[:80]}")
+        logger.warning("SSH command timed out after %ds: %s", timeout, command[:80])
         if check:
             raise subprocess.CalledProcessError(
                 124, cmd,

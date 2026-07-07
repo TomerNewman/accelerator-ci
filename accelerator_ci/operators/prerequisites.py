@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
 from accelerator_ci.operators.errors import OperatorError
 from accelerator_ci.shared.oc_runner import OcRunner
-
 from accelerator_ci.operators.constants import (
     REGISTRY_NAMESPACE,
     REGISTRY_PATCH_MANAGED,
     REGISTRY_PATCH_STORAGE,
 )
+
+logger = logging.getLogger(__name__)
 
 
 REQUIRED_OPERATOR_PATTERNS = [
@@ -23,7 +25,7 @@ REQUIRED_OPERATOR_PATTERNS = [
 
 
 def verify_required_operators(oc: OcRunner, timeout: int = 300) -> None:
-    print("Verifying required cluster operators...")
+    logger.info("Verifying required cluster operators...")
     start = time.monotonic()
     while True:
         if time.monotonic() - start > timeout:
@@ -34,23 +36,23 @@ def verify_required_operators(oc: OcRunner, timeout: int = 300) -> None:
         r = oc.oc("get", "pods", "-A", "--no-headers", timeout=30)
         if r.returncode != 0:
             elapsed = int(time.monotonic() - start)
-            print(f"  API not reachable yet ({elapsed}s)...")
+            logger.info("API not reachable yet (%ds)...", elapsed)
             all_ok = False
         else:
             for pattern, name in REQUIRED_OPERATOR_PATTERNS:
                 lines = [line for line in (r.stdout or "").splitlines() if pattern in line and "Running" in line]
                 if not lines:
-                    print(f"  Waiting for {name} ({pattern})...")
+                    logger.info("Waiting for %s (%s)...", name, pattern)
                     all_ok = False
                     break
         if all_ok:
-            print("  All required operators are running.")
+            logger.info("All required operators are running.")
             return
         time.sleep(15)
 
 
 def configure_internal_registry(oc: OcRunner, timeout: int = 120) -> None:
-    print("Configuring OpenShift internal image registry...")
+    logger.info("Configuring OpenShift internal image registry...")
 
     r = oc.oc(
         "patch",
@@ -80,7 +82,7 @@ def configure_internal_registry(oc: OcRunner, timeout: int = 120) -> None:
     while time.monotonic() - start < timeout:
         r = oc.oc("get", "pods", "-n", REGISTRY_NAMESPACE, "--no-headers", timeout=30)
         if r.returncode == 0 and "Running" in (r.stdout or ""):
-            print("  Internal registry is running.")
+            logger.info("Internal registry is running.")
             return
         time.sleep(10)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import subprocess
@@ -15,6 +16,8 @@ import yaml
 
 from accelerator_ci.shared.ssh import SSH_BASE_OPTS_LIST
 
+logger = logging.getLogger(__name__)
+
 
 def run_tests(
     kubeconfig_path: str | Path,
@@ -26,9 +29,7 @@ def run_tests(
     if not test_dir.is_dir():
         raise FileNotFoundError(f"Test directory not found: {test_dir}")
 
-    print("\n" + "=" * 60)
-    print(f"Running GPU Verification Tests ({test_dir})")
-    print("=" * 60)
+    logger.info("%s\nRunning GPU Verification Tests (%s)\n%s", "=" * 60, test_dir, "=" * 60)
 
     env = {
         **os.environ,
@@ -40,18 +41,15 @@ def run_tests(
         xml_path = Path(junit_xml)
         xml_path.parent.mkdir(parents=True, exist_ok=True)
         cmd += [f"--junitxml={xml_path}"]
-        print(f"  JUnit XML output: {xml_path}")
+        logger.info("JUnit XML output: %s", xml_path)
 
     result = subprocess.run(cmd, env=env)
 
     if result.returncode == 0:
-        print("\n" + "=" * 60)
-        print("GPU Verification Tests: ALL PASSED")
-        print("=" * 60)
+        logger.info("%s\nGPU Verification Tests: ALL PASSED\n%s", "=" * 60, "=" * 60)
     else:
-        print("\n" + "=" * 60)
-        print(f"GPU Verification Tests: FAILED (exit code {result.returncode})")
-        print("=" * 60)
+        logger.error("%s\nGPU Verification Tests: FAILED (exit code %d)\n%s",
+                     "=" * 60, result.returncode, "=" * 60)
 
     return result.returncode
 
@@ -85,7 +83,7 @@ def run_tests_remote(
         "-L", f"127.0.0.1:{local_port}:{api_host}:{api_port}",
         "-N", f"{remote_user}@{remote_host}",
     ]
-    print(f"  Opening SSH tunnel (local :{local_port} -> {api_host}:{api_port} via {remote_host})...")
+    logger.info("Opening SSH tunnel (local :%d -> %s:%d via %s)...", local_port, api_host, api_port, remote_host)
     tunnel = subprocess.Popen(tunnel_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
     tunnel_ready = False
@@ -122,4 +120,4 @@ def run_tests_remote(
             tunnel.kill()
         if tunnel.stderr:
             tunnel.stderr.close()
-        print("  SSH tunnel closed.")
+        logger.info("SSH tunnel closed.")

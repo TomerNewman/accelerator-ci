@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 VERSION_CHANNEL = "stable"
 
@@ -95,12 +98,11 @@ def print_config(params: dict) -> None:
     workers = params["workers"]
     topology = get_cluster_topology_description(ctlplanes, workers)
 
-    print("=" * 60)
-    print(f"OpenShift Cluster Configuration [{topology}]")
-    print("=" * 60)
+    lines = ["=" * 60, f"OpenShift Cluster Configuration [{topology}]", "=" * 60]
     for key, value in params.items():
-        print(f"  {key}: {value}")
-    print("=" * 60)
+        lines.append(f"  {key}: {value}")
+    lines.append("=" * 60)
+    logger.info("%s", "\n".join(lines))
 
 
 def load_config_file(config_path: str | Path) -> dict[str, Any]:

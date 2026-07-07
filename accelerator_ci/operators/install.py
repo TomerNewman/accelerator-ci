@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 
 from accelerator_ci.operators.errors import OperatorError
 from accelerator_ci.shared.oc_runner import OcRunner
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_namespace(oc: OcRunner, name: str) -> None:
@@ -80,14 +83,14 @@ def approve_install_plan(
                 approved = (ip.get("spec") or {}).get("approved", False)
                 if csv_name in csvs and not approved:
                     ip_name = ip["metadata"]["name"]
-                    print(f"  Approving InstallPlan {ip_name} for {csv_name}...")
+                    logger.info("Approving InstallPlan %s for %s...", ip_name, csv_name)
                     patch_r = oc.oc(
                         "patch", "installplan", ip_name, "-n", namespace,
                         "--type", "merge", "-p", '{"spec":{"approved":true}}',
                         timeout=15,
                     )
                     if patch_r.returncode != 0:
-                        print(f"  Patch failed (rc={patch_r.returncode}): {patch_r.stderr or patch_r.stdout}, retrying...")
+                        logger.warning("Patch failed (rc=%d): %s, retrying...", patch_r.returncode, patch_r.stderr or patch_r.stdout)
                         break
                     return
         time.sleep(10)
@@ -115,7 +118,7 @@ def wait_for_csv(oc: OcRunner, namespace: str, timeout: int = 600) -> None:
             raise OperatorError(
                 f"CSV in {namespace} failed: {r2.stdout or 'check oc get csv -n ' + namespace}"
             )
-        print(f"  Waiting for operator CSV in {namespace}... ({phases})")
+        logger.info("Waiting for operator CSV in %s... (%s)", namespace, phases)
         time.sleep(15)
     raise OperatorError(f"Timeout ({timeout}s) waiting for CSV in {namespace}")
 
@@ -147,7 +150,7 @@ def wait_for_subscription_installed(
         installed = (sub.get("status") or {}).get("installedCSV", "").strip()
         if installed:
             return installed
-        print(f"  Waiting for subscription {subscription_name} to resolve...")
+        logger.info("Waiting for subscription %s to resolve...", subscription_name)
         time.sleep(10)
     raise OperatorError(
         f"Timeout ({timeout}s) waiting for subscription {subscription_name} to install (no installedCSV)."
