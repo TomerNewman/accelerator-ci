@@ -39,6 +39,19 @@ class TestParseArgs:
         args = parse_args(["--config", "config.yaml"])
         assert args.command is None
 
+    def test_test_gpu_junit_xml(self):
+        args = parse_args([
+            "--config", "config.yaml",
+            "test-gpu", "--junit-xml", "results/junit.xml",
+        ])
+        assert args.command == "test-gpu"
+        assert args.junit_xml == "results/junit.xml"
+
+    def test_test_gpu_without_junit_xml(self):
+        args = parse_args(["--config", "config.yaml", "test-gpu"])
+        assert args.command == "test-gpu"
+        assert args.junit_xml is None
+
 
 class TestMainRequiresVendor:
     def test_operators_without_vendor_module(self, tmp_path):

@@ -16,7 +16,11 @@ import yaml
 from accelerator_ci.shared.ssh import SSH_BASE_OPTS_LIST
 
 
-def run_tests(kubeconfig_path: str | Path, test_path: str | Path = "tests") -> int:
+def run_tests(
+    kubeconfig_path: str | Path,
+    test_path: str | Path = "tests",
+    junit_xml: str | Path | None = None,
+) -> int:
     test_dir = Path(test_path).resolve()
 
     if not test_dir.is_dir():
@@ -31,10 +35,14 @@ def run_tests(kubeconfig_path: str | Path, test_path: str | Path = "tests") -> i
         "KUBECONFIG": str(Path(kubeconfig_path).resolve()),
     }
 
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", str(test_dir), "-v"],
-        env=env,
-    )
+    cmd = [sys.executable, "-m", "pytest", str(test_dir), "-v"]
+    if junit_xml:
+        xml_path = Path(junit_xml)
+        xml_path.parent.mkdir(parents=True, exist_ok=True)
+        cmd += [f"--junitxml={xml_path}"]
+        print(f"  JUnit XML output: {xml_path}")
+
+    result = subprocess.run(cmd, env=env)
 
     if result.returncode == 0:
         print("\n" + "=" * 60)
@@ -54,6 +62,7 @@ def run_tests_remote(
     kubeconfig_path: Path,
     test_path: str = "tests",
     ssh_key_path: str | None = None,
+    junit_xml: str | Path | None = None,
 ) -> int:
     with open(kubeconfig_path) as f:
         kc = yaml.safe_load(f)
@@ -103,7 +112,7 @@ def run_tests_remote(
     try:
         with os.fdopen(fd, "w") as fh:
             yaml.dump(kc, fh)
-        return run_tests(tmp_kc_path, test_path=test_path)
+        return run_tests(tmp_kc_path, test_path=test_path, junit_xml=junit_xml)
     finally:
         tmp_kc_path.unlink(missing_ok=True)
         tunnel.terminate()

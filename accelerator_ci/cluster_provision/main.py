@@ -99,7 +99,14 @@ Examples:
     subparsers.add_parser("deploy", help="Deploy the OpenShift cluster")
     subparsers.add_parser("delete", help="Delete the OpenShift cluster")
     subparsers.add_parser("operators", help="Install GPU operator stack")
-    subparsers.add_parser("test-gpu", help="Run GPU verification tests")
+
+    test_gpu_parser = subparsers.add_parser("test-gpu", help="Run GPU verification tests")
+    test_gpu_parser.add_argument(
+        "--junit-xml",
+        dest="junit_xml",
+        help="Path to write JUnit XML test results (e.g. results/junit.xml).",
+    )
+
     subparsers.add_parser("cleanup", help="Remove GPU operator stack")
     subparsers.add_parser("must-gather", help="Collect diagnostic data")
 
@@ -209,6 +216,7 @@ def _dispatch(args, command: str, config) -> int:
     elif command == "test-gpu":
         vendor = _require_vendor(args)
         test_path = vendor.get_test_path()
+        junit_xml = getattr(args, "junit_xml", None)
 
         kubeconfig = _require_kubeconfig(config.cluster_name)
 
@@ -220,10 +228,11 @@ def _dispatch(args, command: str, config) -> int:
                 kubeconfig,
                 test_path=test_path,
                 ssh_key_path=config.remote.ssh_key_path,
+                junit_xml=junit_xml,
             )
         else:
             from accelerator_ci.testing.runner import run_tests
-            rc = run_tests(kubeconfig, test_path=test_path)
+            rc = run_tests(kubeconfig, test_path=test_path, junit_xml=junit_xml)
         return rc
 
     elif command == "cleanup":
