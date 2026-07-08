@@ -228,3 +228,78 @@ class TestDryRun:
     def test_dry_run_cleanup_requires_vendor(self, config_file):
         rc = main(["--config", config_file, "--dry-run", "cleanup"])
         assert rc == 1
+
+    def test_dry_run_deploy_skipped_with_kubeconfig(self, config_file, tmp_path, capsys):
+        kc = tmp_path / "kubeconfig"
+        kc.write_text("apiVersion: v1")
+        rc = main(["--config", config_file, "--dry-run", "--kubeconfig", str(kc), "deploy"])
+        assert rc == 0
+        assert "SKIPPED" in capsys.readouterr().out
+
+    def test_dry_run_delete_skipped_with_kubeconfig(self, config_file, tmp_path, capsys):
+        kc = tmp_path / "kubeconfig"
+        kc.write_text("apiVersion: v1")
+        rc = main(["--config", config_file, "--dry-run", "--kubeconfig", str(kc), "delete"])
+        assert rc == 0
+        assert "SKIPPED" in capsys.readouterr().out
+
+
+class TestKubeconfigFlag:
+    def test_kubeconfig_parsed(self):
+        args = parse_args(["--config", "c.yaml", "--kubeconfig", "/tmp/kc", "operators"])
+        assert args.kubeconfig == "/tmp/kc"
+
+    def test_kubeconfig_default_none(self):
+        args = parse_args(["--config", "c.yaml", "deploy"])
+        assert args.kubeconfig is None
+
+
+class TestBYOC:
+    @pytest.fixture
+    def byoc_config_file(self, tmp_path):
+        cfg = {"cluster_name": "external", "ocp_version": "4.16"}
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(cfg))
+        return str(path)
+
+    @pytest.fixture
+    def kubeconfig(self, tmp_path):
+        kc = tmp_path / "kubeconfig"
+        kc.write_text("apiVersion: v1")
+        return str(kc)
+
+    def test_deploy_skipped_with_kubeconfig(self, byoc_config_file, kubeconfig, capsys):
+        rc = main(["--config", byoc_config_file, "--kubeconfig", kubeconfig, "deploy"])
+        assert rc == 0
+        assert "Skipping deploy" in capsys.readouterr().out
+
+    def test_delete_skipped_with_kubeconfig(self, byoc_config_file, kubeconfig, capsys):
+        rc = main(["--config", byoc_config_file, "--kubeconfig", kubeconfig, "delete"])
+        assert rc == 0
+        assert "Skipping delete" in capsys.readouterr().out
+
+    def test_minimal_config_parses(self, byoc_config_file):
+        rc = main(["--config", byoc_config_file, "--dry-run", "deploy"])
+        assert rc == 0
+
+    def test_operators_requires_vendor_in_byoc(self, byoc_config_file, kubeconfig):
+        rc = main(["--config", byoc_config_file, "--kubeconfig", kubeconfig, "operators"])
+        assert rc == 1
+
+    def test_missing_kubeconfig_file_errors(self, byoc_config_file, capsys):
+        rc = main(["--config", byoc_config_file, "--kubeconfig", "/nonexistent/kc", "deploy"])
+        assert rc == 1
+        assert "kubeconfig not found" in capsys.readouterr().out
+
+    def test_kubeconfig_and_remote_host_mutual_exclusion(self, tmp_path):
+        cfg = {
+            "cluster_name": "test",
+            "ocp_version": "4.16",
+            "remote": {"host": "gpu-host", "user": "root"},
+        }
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.dump(cfg))
+        kc = tmp_path / "kubeconfig"
+        kc.write_text("apiVersion: v1")
+        rc = main(["--config", str(config_path), "--kubeconfig", str(kc), "operators"])
+        assert rc == 1

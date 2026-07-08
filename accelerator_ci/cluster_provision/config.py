@@ -115,28 +115,33 @@ def load_config_file(config_path: str | Path) -> dict[str, Any]:
 
 
 def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
-    """Parse raw YAML dictionary into ClusterConfig."""
+    """Parse raw YAML dictionary into ClusterConfig.
+
+    Only cluster_name and ocp_version are required.  Everything else
+    falls back to sensible defaults so that bring-your-own-cluster
+    users can get away with a two-key config file.
+    """
     try:
-        remote_data = raw_config["remote"]
+        remote_data = raw_config.get("remote", {})
         remote = RemoteConfig(
             host=remote_data.get("host"),
-            user=remote_data["user"],
+            user=remote_data.get("user", "root"),
             ssh_key_path=_expand_path(remote_data.get("ssh_key_path")),
         )
 
-        ctlplane_data = raw_config["ctlplane"]
+        ctlplane_data = raw_config.get("ctlplane", {})
         ctlplane = NodeConfig(
-            numcpus=ctlplane_data["numcpus"],
-            memory=ctlplane_data["memory"],
+            numcpus=ctlplane_data.get("numcpus", 4),
+            memory=ctlplane_data.get("memory", 8192),
         )
 
-        worker_data = raw_config["worker"]
+        worker_data = raw_config.get("worker", {})
         worker = NodeConfig(
-            numcpus=worker_data["numcpus"],
-            memory=worker_data["memory"],
+            numcpus=worker_data.get("numcpus", 4),
+            memory=worker_data.get("memory", 8192),
         )
 
-        pci_devices = raw_config["pci_devices"] or []
+        pci_devices = raw_config.get("pci_devices") or []
         if isinstance(pci_devices, str):
             pci_devices = [d.strip() for d in pci_devices.replace(",", " ").split() if d.strip()]
 
@@ -157,20 +162,20 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
 
         return ClusterConfig(
             ocp_version=raw_config["ocp_version"],
-            pull_secret_path=_expand_path(raw_config["pull_secret_path"]),
+            pull_secret_path=_expand_path(raw_config.get("pull_secret_path", "")),
             cluster_name=raw_config["cluster_name"],
-            domain=raw_config["domain"],
-            ctlplanes=raw_config["ctlplanes"],
-            workers=raw_config["workers"],
+            domain=raw_config.get("domain", "example.com"),
+            ctlplanes=raw_config.get("ctlplanes", 1),
+            workers=raw_config.get("workers", 0),
             ctlplane=ctlplane,
             worker=worker,
-            disk_size=raw_config["disk_size"],
-            network=raw_config["network"],
-            api_ip=raw_config["api_ip"],
+            disk_size=raw_config.get("disk_size", 120),
+            network=raw_config.get("network", "default"),
+            api_ip=raw_config.get("api_ip", ""),
             remote=remote,
             pci_devices=pci_devices,
-            wait_timeout=raw_config["wait_timeout"],
-            version_channel=raw_config["version_channel"],
+            wait_timeout=raw_config.get("wait_timeout", 3600),
+            version_channel=raw_config.get("version_channel", "stable"),
             vendor=raw_config.get("vendor", ""),
             operators=operators,
             must_gather=must_gather,
@@ -178,8 +183,23 @@ def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
     except KeyError as exc:
         raise KeyError(
             f"Missing required config key: {exc}. "
-            f"See cluster-config.yaml.example for all required fields."
+            f"Minimum required: cluster_name, ocp_version."
         ) from exc
+
+
+def validate_deploy_config(config: ClusterConfig) -> None:
+    """Catch missing kcli fields early so we don't waste 30 min on a doomed deploy."""
+    problems: list[str] = []
+    if not config.pull_secret_path:
+        problems.append("pull_secret_path is required for deploy")
+    if not config.api_ip:
+        problems.append("api_ip is required for deploy")
+    if config.domain == "example.com":
+        problems.append("domain is still the placeholder 'example.com'")
+    if problems:
+        raise RuntimeError(
+            "Deploy config validation failed:\n  - " + "\n  - ".join(problems)
+        )
 
 
 def load_cluster_config(config_path: str | Path) -> ClusterConfig:

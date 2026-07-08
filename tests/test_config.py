@@ -8,6 +8,7 @@ from accelerator_ci.cluster_provision.config import (
     parse_config,
     load_config_file,
     get_kcli_params,
+    validate_deploy_config,
     get_cluster_topology_description,
     ClusterConfig,
     _expand_path,
@@ -131,6 +132,60 @@ class TestParseConfig:
         del raw["must_gather"]
         config = parse_config(raw)
         assert "must-gather-output" in config.must_gather.artifact_dir
+
+    def test_byoc_minimal_config(self):
+        raw = {"cluster_name": "external", "ocp_version": "4.16"}
+        config = parse_config(raw)
+        assert config.cluster_name == "external"
+        assert config.ocp_version == "4.16"
+        assert config.domain == "example.com"
+        assert config.ctlplanes == 1
+        assert config.workers == 0
+        assert config.network == "default"
+        assert config.remote.host is None
+        assert config.remote.user == "root"
+        assert config.operators.machine_config_role == "worker"
+
+    def test_byoc_missing_cluster_name_raises(self):
+        raw = {"ocp_version": "4.16"}
+        with pytest.raises(KeyError, match="cluster_name"):
+            parse_config(raw)
+
+    def test_byoc_missing_ocp_version_raises(self):
+        raw = {"cluster_name": "test"}
+        with pytest.raises(KeyError, match="ocp_version"):
+            parse_config(raw)
+
+
+class TestValidateDeployConfig:
+    _DEPLOY_CONFIG = {**MINIMAL_CONFIG, "domain": "lab.local"}
+
+    def test_full_config_passes(self):
+        config = parse_config(self._DEPLOY_CONFIG)
+        validate_deploy_config(config)
+
+    def test_missing_pull_secret_raises(self):
+        raw = {**self._DEPLOY_CONFIG, "pull_secret_path": ""}
+        config = parse_config(raw)
+        with pytest.raises(RuntimeError, match="pull_secret_path"):
+            validate_deploy_config(config)
+
+    def test_missing_api_ip_raises(self):
+        raw = {**self._DEPLOY_CONFIG, "api_ip": ""}
+        config = parse_config(raw)
+        with pytest.raises(RuntimeError, match="api_ip"):
+            validate_deploy_config(config)
+
+    def test_default_domain_raises(self):
+        config = parse_config(MINIMAL_CONFIG)
+        with pytest.raises(RuntimeError, match="domain"):
+            validate_deploy_config(config)
+
+    def test_byoc_minimal_not_deployable(self):
+        raw = {"cluster_name": "external", "ocp_version": "4.16"}
+        config = parse_config(raw)
+        with pytest.raises(RuntimeError):
+            validate_deploy_config(config)
 
 
 class TestLoadConfigFile:

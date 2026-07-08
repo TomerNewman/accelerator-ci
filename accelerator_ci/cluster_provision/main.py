@@ -15,6 +15,7 @@ from accelerator_ci.cluster_provision.config import (
     get_kcli_params,
     load_cluster_config,
     print_config,
+    validate_deploy_config,
 )
 from accelerator_ci.cluster_provision.params import update_version_to_latest_patch
 from accelerator_ci.cluster_provision.deploy import deploy_cluster
@@ -49,7 +50,7 @@ def _load_vendor_profile(vendor_module: str):
     )
 
 
-def _get_oc_runner(config):
+def _get_oc_runner(config, kubeconfig_override: str | None = None):
     if config.remote.host and config.remote.ssh_key_path:
         from accelerator_ci.shared.ssh import set_ssh_key_path
         set_ssh_key_path(config.remote.ssh_key_path)
@@ -63,11 +64,16 @@ def _get_oc_runner(config):
         )
 
     from accelerator_ci.shared.oc_runner import LocalOcRunner
-    kubeconfig = _require_kubeconfig(config.cluster_name)
+    kubeconfig = _resolve_kubeconfig(config.cluster_name, kubeconfig_override)
     return LocalOcRunner(kubeconfig)
 
 
-def _require_kubeconfig(cluster_name: str) -> Path:
+def _resolve_kubeconfig(cluster_name: str, override: str | None = None) -> Path:
+    if override:
+        kc = Path(override).expanduser().resolve()
+        if not kc.exists():
+            raise FileNotFoundError(f"kubeconfig not found at {kc}")
+        return kc
     kc = _kubeconfig_path(cluster_name)
     if not kc.exists():
         raise FileNotFoundError(f"kubeconfig not found at {kc}")
@@ -112,6 +118,11 @@ Examples:
         dest="dry_run",
         action="store_true",
         help="Show the execution plan without running anything.",
+    )
+    parser.add_argument(
+        "--kubeconfig",
+        help="Use an existing cluster instead of provisioning one. "
+             "Skips deploy/delete; other commands run against this kubeconfig.",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Action to perform")
@@ -176,6 +187,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dry_run_deploy(args, config) -> None:
+    if args.kubeconfig:
+        logger.info("Dry-run: deploy — SKIPPED (using external kubeconfig: %s)", args.kubeconfig)
+        return
+
     ocp_version = update_version_to_latest_patch(config.ocp_version, config.version_channel)
 
     pci_devices = list(config.pci_devices)
@@ -235,6 +250,10 @@ def _dry_run_deploy(args, config) -> None:
 
 
 def _dry_run_delete(args, config) -> None:
+    if args.kubeconfig:
+        logger.info("Dry-run: delete — SKIPPED (using external cluster)")
+        return
+
     target = f"remote ({config.remote.user}@{config.remote.host})" if config.remote.host else "local"
     lines = [
         "Dry-run: delete",
@@ -353,6 +372,16 @@ _DRY_RUN_HANDLERS = {
 
 
 def _dispatch(args, command: str, config) -> int:
+    kc_override = args.kubeconfig
+
+    if kc_override:
+        _resolve_kubeconfig(config.cluster_name, kc_override)
+        if config.remote.host:
+            raise RuntimeError(
+                "--kubeconfig and remote.host are mutually exclusive. "
+                "Remove the remote section from your config or drop --kubeconfig."
+            )
+
     if args.dry_run:
         handler = _DRY_RUN_HANDLERS.get(command)
         if not handler:
@@ -362,6 +391,12 @@ def _dispatch(args, command: str, config) -> int:
         return 0
 
     if command == "deploy":
+        if kc_override:
+            logger.info("Skipping deploy — using external kubeconfig: %s", kc_override)
+            return 0
+
+        validate_deploy_config(config)
+
         ocp_version = update_version_to_latest_patch(config.ocp_version, config.version_channel)
 
         pci_devices = list(config.pci_devices)
@@ -404,6 +439,10 @@ def _dispatch(args, command: str, config) -> int:
             logger.info("Wrote ocp.version: %s", ocp_version)
 
     elif command == "delete":
+        if kc_override:
+            logger.info("Skipping delete — using external cluster")
+            return 0
+
         params = {"cluster": config.cluster_name}
 
         delete_cluster(
@@ -417,7 +456,7 @@ def _dispatch(args, command: str, config) -> int:
         from accelerator_ci.operators.orchestrator import install_operators
 
         vendor = _require_vendor(args)
-        oc = _get_oc_runner(config)
+        oc = _get_oc_runner(config, kubeconfig_override=kc_override)
 
         machine_config_role = config.operators.machine_config_role
         if config.ctlplanes == 1 and config.workers == 0:
@@ -439,7 +478,7 @@ def _dispatch(args, command: str, config) -> int:
         test_path = vendor.get_test_path()
         junit_xml = getattr(args, "junit_xml", None)
 
-        kubeconfig = _require_kubeconfig(config.cluster_name)
+        kubeconfig = _resolve_kubeconfig(config.cluster_name, kc_override)
 
         if config.remote.host:
             from accelerator_ci.testing.runner import run_tests_remote
@@ -460,7 +499,7 @@ def _dispatch(args, command: str, config) -> int:
         from accelerator_ci.operators.orchestrator import cleanup_operators
 
         vendor = _require_vendor(args)
-        oc = _get_oc_runner(config)
+        oc = _get_oc_runner(config, kubeconfig_override=kc_override)
 
         cleanup_operators(oc, vendor=vendor)
 
@@ -483,7 +522,7 @@ def _dispatch(args, command: str, config) -> int:
                 artifact_dir=artifact_dir,
             )
         else:
-            kubeconfig = _require_kubeconfig(config.cluster_name)
+            kubeconfig = _resolve_kubeconfig(config.cluster_name, kc_override)
             return run_must_gather(kubeconfig=str(kubeconfig), artifact_dir=artifact_dir)
 
     else:
