@@ -16,7 +16,7 @@ def ensure_namespace(oc: OcRunner, name: str) -> None:
     r = oc.oc("get", "namespace", name, timeout=10)
     if r.returncode == 0:
         return
-    r = oc.oc("create", "namespace", name, timeout=10)
+    r = oc.oc("create", "namespace", name, timeout=10, retries=0)
     if r.returncode != 0:
         raise OperatorError(f"Failed to create namespace {name}: {r.stderr or r.stdout}")
 
