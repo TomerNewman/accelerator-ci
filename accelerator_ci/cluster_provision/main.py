@@ -107,6 +107,12 @@ Examples:
         action="store_true",
         help="Suppress informational output (WARNING and above only).",
     )
+    parser.add_argument(
+        "-n", "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Show the execution plan without running anything.",
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="Action to perform")
     subparsers.add_parser("deploy", help="Deploy the OpenShift cluster")
@@ -169,7 +175,192 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
+def _dry_run_deploy(args, config) -> None:
+    ocp_version = update_version_to_latest_patch(config.ocp_version, config.version_channel)
+
+    pci_devices = list(config.pci_devices)
+    vendor_name = None
+    if args.vendor_module:
+        vendor = _load_vendor_profile(args.vendor_module)
+        vendor_name = vendor.display_name
+        host_args = dict(
+            host=config.remote.host or "localhost",
+            user=config.remote.user,
+            ssh_key=config.remote.ssh_key_path,
+            vendor_config=config.operators.vendor_config,
+        )
+        extra_devices = vendor.get_pci_devices(**host_args)
+        if extra_devices:
+            pci_devices.extend(extra_devices)
+
+    target = f"remote ({config.remote.user}@{config.remote.host})" if config.remote.host else "local"
+    topology = f"{config.ctlplanes} control-plane"
+    if config.workers:
+        topology += f", {config.workers} worker(s)"
+    else:
+        topology += " (SNO)"
+
+    lines = [
+        "Dry-run: deploy",
+        f"  Cluster:      {config.cluster_name}",
+        f"  OCP version:  {ocp_version} (channel: {config.version_channel})",
+        f"  Domain:       {config.domain}",
+        f"  Target:       {target}",
+        f"  Topology:     {topology}",
+        f"  API IP:       {config.api_ip}",
+        f"  Network:      {config.network}",
+        f"  Control-plane: {config.ctlplane.numcpus} vCPU, {config.ctlplane.memory} MB RAM",
+        f"  Worker:       {config.worker.numcpus} vCPU, {config.worker.memory} MB RAM",
+        f"  Disk:         {config.disk_size} GB",
+    ]
+    if vendor_name:
+        lines.append(f"  Vendor:       {vendor_name} (host_setup will run)")
+    if pci_devices:
+        lines.append(f"  PCI devices:  {pci_devices}")
+    if config.remote.host:
+        lines.append("  Steps:")
+        lines.append("    1. Setup remote libvirt")
+        lines.append("    2. Configure kcli client")
+        lines.append("    3. Push SSH key to remote host")
+        lines.append("    4. Run kcli create cluster openshift")
+        lines.append("    5. Setup remote cluster access (kubeconfig, /etc/hosts)")
+        lines.append("    6. Wait for cluster ready")
+        if pci_devices:
+            lines.append("    7. Attach PCI devices to VMs")
+    else:
+        lines.append("  Steps:")
+        lines.append("    1. Run kcli create cluster openshift")
+
+    logger.info("%s", "\n".join(lines))
+
+
+def _dry_run_delete(args, config) -> None:
+    target = f"remote ({config.remote.user}@{config.remote.host})" if config.remote.host else "local"
+    lines = [
+        "Dry-run: delete",
+        f"  Cluster: {config.cluster_name}",
+        f"  Target:  {target}",
+    ]
+    logger.info("%s", "\n".join(lines))
+
+
+def _dry_run_operators(args, config) -> None:
+    vendor = _require_vendor(args)
+    ops = vendor.get_operators(config.operators.vendor_config)
+
+    machine_config_role = config.operators.machine_config_role
+    if config.ctlplanes == 1 and config.workers == 0:
+        machine_config_role = "master"
+
+    target = f"remote ({config.remote.user}@{config.remote.host})" if config.remote.host else "local"
+    lines = [
+        "Dry-run: operators",
+        f"  Vendor:        {vendor.display_name}",
+        f"  Target:        {target}",
+        f"  MCP role:      {machine_config_role}",
+        f"  OCP version:   {config.ocp_version}",
+        "  Pre-flight:",
+        "    - Verify required operators (marketplace, OLM)",
+        "    - Configure internal registry",
+        "    - Wait for cluster stability",
+        "    - Run vendor pre_operator_setup",
+        "    - Wait for MachineConfigPool update",
+        f"  Operators ({len(ops)}):",
+    ]
+    for i, op in enumerate(ops, 1):
+        lines.append(f"    {i}. {op.name}")
+        lines.append(f"       package:   {op.package}")
+        lines.append(f"       namespace: {op.namespace}")
+        lines.append(f"       catalog:   {op.catalog}")
+        lines.append(f"       channel:   {op.channel}")
+        if op.manual_approval:
+            lines.append(f"       approval:  manual (startingCSV: {op.starting_csv})")
+    lines.append("  Post-install:")
+    lines.append("    - Run vendor post_operator_setup")
+    lines.append("    - Wait for cluster stability")
+    lines.append("    - Wait for GPU readiness")
+
+    logger.info("%s", "\n".join(lines))
+
+
+def _dry_run_test_gpu(args, config) -> None:
+    vendor = _require_vendor(args)
+    test_path = vendor.get_test_path()
+    junit_xml = getattr(args, "junit_xml", None)
+    target = f"remote ({config.remote.user}@{config.remote.host})" if config.remote.host else "local"
+
+    lines = [
+        "Dry-run: test-gpu",
+        f"  Vendor:    {vendor.display_name}",
+        f"  Target:    {target}",
+        f"  Test path: {test_path}",
+    ]
+    if junit_xml:
+        lines.append(f"  JUnit XML: {junit_xml}")
+    if config.remote.host:
+        lines.append("  Steps:")
+        lines.append("    1. Open SSH tunnel to cluster API")
+        lines.append("    2. Rewrite kubeconfig for tunnel")
+        lines.append("    3. Run pytest via SSH")
+    else:
+        lines.append("  Steps:")
+        lines.append("    1. Run pytest locally")
+
+    logger.info("%s", "\n".join(lines))
+
+
+def _dry_run_cleanup(args, config) -> None:
+    vendor = _require_vendor(args)
+    target = f"remote ({config.remote.user}@{config.remote.host})" if config.remote.host else "local"
+    lines = [
+        "Dry-run: cleanup",
+        f"  Vendor: {vendor.display_name}",
+        f"  Target: {target}",
+        "  Steps:",
+        "    1. Run vendor cleanup()",
+    ]
+    logger.info("%s", "\n".join(lines))
+
+
+def _dry_run_must_gather(args, config) -> None:
+    artifact_dir = config.must_gather.artifact_dir
+    target = f"remote ({config.remote.user}@{config.remote.host})" if config.remote.host else "local"
+    lines = [
+        "Dry-run: must-gather",
+        f"  Artifact dir: {artifact_dir}",
+        f"  Target:       {target}",
+    ]
+    if config.remote.host:
+        lines.append("  Steps:")
+        lines.append("    1. SCP must-gather script to remote host")
+        lines.append("    2. Execute must-gather remotely")
+        lines.append("    3. Stream artifacts back via tar pipeline")
+    else:
+        lines.append("  Steps:")
+        lines.append("    1. Run must-gather.sh locally")
+
+    logger.info("%s", "\n".join(lines))
+
+
+_DRY_RUN_HANDLERS = {
+    "deploy": _dry_run_deploy,
+    "delete": _dry_run_delete,
+    "operators": _dry_run_operators,
+    "test-gpu": _dry_run_test_gpu,
+    "cleanup": _dry_run_cleanup,
+    "must-gather": _dry_run_must_gather,
+}
+
+
 def _dispatch(args, command: str, config) -> int:
+    if args.dry_run:
+        handler = _DRY_RUN_HANDLERS.get(command)
+        if not handler:
+            logger.error("Unknown command: %s", command)
+            return 1
+        handler(args, config)
+        return 0
+
     if command == "deploy":
         ocp_version = update_version_to_latest_patch(config.ocp_version, config.version_channel)
 

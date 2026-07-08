@@ -4,7 +4,9 @@ import logging
 
 import pytest
 
-from accelerator_ci.cluster_provision.main import parse_args, _configure_logging
+import yaml
+
+from accelerator_ci.cluster_provision.main import parse_args, main, _configure_logging
 
 
 class TestParseArgs:
@@ -69,30 +71,42 @@ class TestParseArgs:
         assert args.verbose is False
         assert args.quiet is False
 
+    def test_dry_run_flag(self):
+        args = parse_args(["--config", "config.yaml", "--dry-run", "deploy"])
+        assert args.dry_run is True
+
+    def test_dry_run_short_flag(self):
+        args = parse_args(["--config", "config.yaml", "-n", "deploy"])
+        assert args.dry_run is True
+
+    def test_dry_run_default_false(self):
+        args = parse_args(["--config", "config.yaml", "deploy"])
+        assert args.dry_run is False
+
+
+_MINIMAL_CONFIG = {
+    "ocp_version": "4.20",
+    "pull_secret_path": "/tmp/ps.json",
+    "cluster_name": "test",
+    "domain": "example.com",
+    "ctlplanes": 1,
+    "workers": 0,
+    "ctlplane": {"numcpus": 4, "memory": 8192},
+    "worker": {"numcpus": 4, "memory": 8192},
+    "disk_size": 120,
+    "network": "default",
+    "api_ip": "192.168.1.1",
+    "remote": {"host": None, "user": "root", "ssh_key_path": None},
+    "pci_devices": [],
+    "wait_timeout": 3600,
+    "version_channel": "stable",
+}
+
 
 class TestMainRequiresVendor:
     def test_operators_without_vendor_module(self, tmp_path):
-        from accelerator_ci.cluster_provision.main import main
-        import yaml
-
         config = tmp_path / "config.yaml"
-        config.write_text(yaml.dump({
-            "ocp_version": "4.20",
-            "pull_secret_path": "/tmp/ps.json",
-            "cluster_name": "test",
-            "domain": "example.com",
-            "ctlplanes": 1,
-            "workers": 0,
-            "ctlplane": {"numcpus": 4, "memory": 8192},
-            "worker": {"numcpus": 4, "memory": 8192},
-            "disk_size": 120,
-            "network": "default",
-            "api_ip": "192.168.1.1",
-            "remote": {"host": None, "user": "root", "ssh_key_path": None},
-            "pci_devices": [],
-            "wait_timeout": 3600,
-            "version_channel": "stable",
-        }))
+        config.write_text(yaml.dump(_MINIMAL_CONFIG))
 
         rc = main(["--config", str(config), "operators"])
         assert rc == 1
@@ -126,3 +140,91 @@ class TestConfigureLogging:
     def test_verbose_wins_over_quiet(self):
         _configure_logging(verbose=True, quiet=True)
         assert logging.getLogger().level == logging.DEBUG
+
+
+class TestDryRun:
+    @pytest.fixture
+    def config_file(self, tmp_path):
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(_MINIMAL_CONFIG))
+        return str(path)
+
+    @pytest.fixture
+    def remote_config_file(self, tmp_path):
+        cfg = {**_MINIMAL_CONFIG, "remote": {"host": "gpu-host", "user": "root", "ssh_key_path": None}}
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(cfg))
+        return str(path)
+
+    @pytest.fixture
+    def multi_node_config_file(self, tmp_path):
+        cfg = {**_MINIMAL_CONFIG, "ctlplanes": 3, "workers": 2}
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(cfg))
+        return str(path)
+
+    def test_dry_run_deploy_returns_zero(self, config_file):
+        rc = main(["--config", config_file, "--dry-run", "deploy"])
+        assert rc == 0
+
+    def test_dry_run_deploy_local(self, config_file, capsys):
+        main(["--config", config_file, "--dry-run", "deploy"])
+        out = capsys.readouterr().out
+        assert "Dry-run: deploy" in out
+        assert "test" in out
+        assert "local" in out
+
+    def test_dry_run_deploy_remote(self, remote_config_file, capsys):
+        main(["--config", remote_config_file, "--dry-run", "deploy"])
+        out = capsys.readouterr().out
+        assert "remote" in out
+        assert "gpu-host" in out
+        assert "Setup remote libvirt" in out
+
+    def test_dry_run_deploy_sno_topology(self, config_file, capsys):
+        main(["--config", config_file, "--dry-run", "deploy"])
+        out = capsys.readouterr().out
+        assert "SNO" in out
+
+    def test_dry_run_deploy_multi_node(self, multi_node_config_file, capsys):
+        main(["--config", multi_node_config_file, "--dry-run", "deploy"])
+        out = capsys.readouterr().out
+        assert "3 control-plane" in out
+        assert "2 worker(s)" in out
+
+    def test_dry_run_delete_returns_zero(self, config_file):
+        rc = main(["--config", config_file, "--dry-run", "delete"])
+        assert rc == 0
+
+    def test_dry_run_delete(self, config_file, capsys):
+        main(["--config", config_file, "--dry-run", "delete"])
+        out = capsys.readouterr().out
+        assert "Dry-run: delete" in out
+        assert "test" in out
+
+    def test_dry_run_must_gather_returns_zero(self, config_file):
+        rc = main(["--config", config_file, "--dry-run", "must-gather"])
+        assert rc == 0
+
+    def test_dry_run_must_gather_local(self, config_file, capsys):
+        main(["--config", config_file, "--dry-run", "must-gather"])
+        out = capsys.readouterr().out
+        assert "Dry-run: must-gather" in out
+        assert "must-gather.sh locally" in out
+
+    def test_dry_run_must_gather_remote(self, remote_config_file, capsys):
+        main(["--config", remote_config_file, "--dry-run", "must-gather"])
+        out = capsys.readouterr().out
+        assert "SCP must-gather script" in out
+
+    def test_dry_run_operators_requires_vendor(self, config_file):
+        rc = main(["--config", config_file, "--dry-run", "operators"])
+        assert rc == 1
+
+    def test_dry_run_test_gpu_requires_vendor(self, config_file):
+        rc = main(["--config", config_file, "--dry-run", "test-gpu"])
+        assert rc == 1
+
+    def test_dry_run_cleanup_requires_vendor(self, config_file):
+        rc = main(["--config", config_file, "--dry-run", "cleanup"])
+        assert rc == 1
