@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from accelerator_ci.cluster_provision.config import (
     get_kcli_params,
     load_cluster_config,
@@ -182,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config = load_cluster_config(args.config_file)
-    except (FileNotFoundError, KeyError) as e:
+    except (FileNotFoundError, ValidationError) as e:
         logger.error("Error: %s", e)
         return 1
 

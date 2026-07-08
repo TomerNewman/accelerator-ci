@@ -1,70 +1,112 @@
-"""OpenShift cluster configuration."""
+"""OpenShift cluster configuration backed by Pydantic validation."""
 
 from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
 VERSION_CHANNEL = "stable"
 
 
-@dataclass
-class RemoteConfig:
-    host: str | None
-    user: str
-    ssh_key_path: str | None
-
-
-@dataclass
-class NodeConfig:
-    numcpus: int
-    memory: int
-
-
-@dataclass
-class OperatorsConfig:
-    machine_config_role: str
-    vendor_config: dict[str, Any]
-
-
-@dataclass
-class MustGatherConfig:
-    artifact_dir: str
-
-
-@dataclass
-class ClusterConfig:
-    ocp_version: str
-    pull_secret_path: str
-    cluster_name: str
-    domain: str
-    ctlplanes: int
-    workers: int
-    ctlplane: NodeConfig
-    worker: NodeConfig
-    disk_size: int
-    network: str
-    api_ip: str
-    remote: RemoteConfig
-    pci_devices: list[str]
-    wait_timeout: int
-    version_channel: str
-    vendor: str
-    operators: OperatorsConfig
-    must_gather: MustGatherConfig
-
-
 def _expand_path(path: str | None) -> str | None:
     if path is None:
         return None
     return os.path.expanduser(os.path.expandvars(path))
+
+
+class RemoteConfig(BaseModel):
+    host: str | None = None
+    user: str = "root"
+    ssh_key_path: str | None = None
+
+    @field_validator("ssh_key_path", mode="before")
+    @classmethod
+    def expand_ssh_key(cls, v: str | None) -> str | None:
+        return _expand_path(v)
+
+
+class NodeConfig(BaseModel):
+    numcpus: int = 4
+    memory: int = 8192
+
+
+class OperatorsConfig(BaseModel):
+    machine_config_role: str = "worker"
+    vendor_config: dict[str, Any] = Field(default_factory=dict)
+
+
+class MustGatherConfig(BaseModel):
+    artifact_dir: str = "./must-gather-output"
+
+    @field_validator("artifact_dir", mode="before")
+    @classmethod
+    def expand_artifact_dir(cls, v: str | None) -> str:
+        return _expand_path(v) or "./must-gather-output"
+
+
+class ClusterConfig(BaseModel):
+    """Top-level cluster configuration.
+
+    Only cluster_name and ocp_version are required. Everything else
+    has defaults so BYOC users can use a two-key config file.
+    """
+    cluster_name: str
+    ocp_version: str
+    pull_secret_path: str = ""
+    domain: str = "example.com"
+    ctlplanes: int = 1
+    workers: int = 0
+    ctlplane: NodeConfig = Field(default_factory=NodeConfig)
+    worker: NodeConfig = Field(default_factory=NodeConfig)
+    disk_size: int = 120
+    network: str = "default"
+    api_ip: str = ""
+    remote: RemoteConfig = Field(default_factory=RemoteConfig)
+    pci_devices: list[str] = Field(default_factory=list)
+    wait_timeout: int = 3600
+    version_channel: str = "stable"
+    vendor: str = ""
+    operators: OperatorsConfig = Field(default_factory=OperatorsConfig)
+    must_gather: MustGatherConfig = Field(default_factory=MustGatherConfig)
+
+    @field_validator("pull_secret_path", mode="before")
+    @classmethod
+    def expand_pull_secret(cls, v: str | None) -> str:
+        return _expand_path(v) or ""
+
+    @field_validator("pci_devices", mode="before")
+    @classmethod
+    def normalize_pci_devices(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [d.strip() for d in v.replace(",", " ").split() if d.strip()]
+        return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_vendor_config(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Pull vendor-specific keys out of the operators section."""
+        if not isinstance(data, dict):
+            return data
+        operators_data = data.get("operators")
+        if isinstance(operators_data, dict) and "vendor_config" not in operators_data:
+            vendor_config = {
+                k: v for k, v in operators_data.items()
+                if k not in ("install", "machine_config_role")
+            }
+            data = {**data, "operators": {
+                "machine_config_role": operators_data.get("machine_config_role", "worker"),
+                "vendor_config": vendor_config,
+            }}
+        return data
 
 
 def get_kcli_params(config: ClusterConfig, tag: str) -> dict:
@@ -115,76 +157,12 @@ def load_config_file(config_path: str | Path) -> dict[str, Any]:
 
 
 def parse_config(raw_config: dict[str, Any]) -> ClusterConfig:
-    """Parse raw YAML dictionary into ClusterConfig.
+    """Validate and parse raw YAML dict into ClusterConfig.
 
-    Only cluster_name and ocp_version are required.  Everything else
-    falls back to sensible defaults so that bring-your-own-cluster
-    users can get away with a two-key config file.
+    Raises pydantic.ValidationError with clear per-field messages
+    on bad input.
     """
-    try:
-        remote_data = raw_config.get("remote", {})
-        remote = RemoteConfig(
-            host=remote_data.get("host"),
-            user=remote_data.get("user", "root"),
-            ssh_key_path=_expand_path(remote_data.get("ssh_key_path")),
-        )
-
-        ctlplane_data = raw_config.get("ctlplane", {})
-        ctlplane = NodeConfig(
-            numcpus=ctlplane_data.get("numcpus", 4),
-            memory=ctlplane_data.get("memory", 8192),
-        )
-
-        worker_data = raw_config.get("worker", {})
-        worker = NodeConfig(
-            numcpus=worker_data.get("numcpus", 4),
-            memory=worker_data.get("memory", 8192),
-        )
-
-        pci_devices = raw_config.get("pci_devices") or []
-        if isinstance(pci_devices, str):
-            pci_devices = [d.strip() for d in pci_devices.replace(",", " ").split() if d.strip()]
-
-        operators_data = raw_config.get("operators", {})
-        vendor_config = {
-            k: v for k, v in operators_data.items()
-            if k not in ("install", "machine_config_role")
-        }
-        operators = OperatorsConfig(
-            machine_config_role=operators_data.get("machine_config_role", "worker"),
-            vendor_config=vendor_config,
-        )
-
-        must_gather_data = raw_config.get("must_gather", {})
-        must_gather = MustGatherConfig(
-            artifact_dir=_expand_path(must_gather_data.get("artifact_dir", "./must-gather-output")),
-        )
-
-        return ClusterConfig(
-            ocp_version=raw_config["ocp_version"],
-            pull_secret_path=_expand_path(raw_config.get("pull_secret_path", "")),
-            cluster_name=raw_config["cluster_name"],
-            domain=raw_config.get("domain", "example.com"),
-            ctlplanes=raw_config.get("ctlplanes", 1),
-            workers=raw_config.get("workers", 0),
-            ctlplane=ctlplane,
-            worker=worker,
-            disk_size=raw_config.get("disk_size", 120),
-            network=raw_config.get("network", "default"),
-            api_ip=raw_config.get("api_ip", ""),
-            remote=remote,
-            pci_devices=pci_devices,
-            wait_timeout=raw_config.get("wait_timeout", 3600),
-            version_channel=raw_config.get("version_channel", "stable"),
-            vendor=raw_config.get("vendor", ""),
-            operators=operators,
-            must_gather=must_gather,
-        )
-    except KeyError as exc:
-        raise KeyError(
-            f"Missing required config key: {exc}. "
-            f"Minimum required: cluster_name, ocp_version."
-        ) from exc
+    return ClusterConfig(**raw_config)
 
 
 def validate_deploy_config(config: ClusterConfig) -> None:

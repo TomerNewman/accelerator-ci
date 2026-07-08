@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 import yaml
 from pathlib import Path
+from pydantic import ValidationError
 
 from accelerator_ci.cluster_provision.config import (
     parse_config,
@@ -118,7 +119,7 @@ class TestParseConfig:
     def test_missing_required_key_raises(self):
         raw = {**MINIMAL_CONFIG}
         del raw["cluster_name"]
-        with pytest.raises(KeyError, match="cluster_name"):
+        with pytest.raises(ValidationError, match="cluster_name"):
             parse_config(raw)
 
     def test_defaults_when_operators_missing(self):
@@ -148,12 +149,25 @@ class TestParseConfig:
 
     def test_byoc_missing_cluster_name_raises(self):
         raw = {"ocp_version": "4.16"}
-        with pytest.raises(KeyError, match="cluster_name"):
+        with pytest.raises(ValidationError, match="cluster_name"):
             parse_config(raw)
 
     def test_byoc_missing_ocp_version_raises(self):
         raw = {"cluster_name": "test"}
-        with pytest.raises(KeyError, match="ocp_version"):
+        with pytest.raises(ValidationError, match="ocp_version"):
+            parse_config(raw)
+
+    def test_multiple_errors_reported_at_once(self):
+        with pytest.raises(ValidationError) as exc_info:
+            parse_config({})
+        errors = exc_info.value.errors()
+        field_names = {e["loc"][0] for e in errors}
+        assert "cluster_name" in field_names
+        assert "ocp_version" in field_names
+
+    def test_wrong_type_gives_clear_error(self):
+        raw = {**MINIMAL_CONFIG, "ctlplanes": "not_a_number"}
+        with pytest.raises(ValidationError, match="ctlplanes"):
             parse_config(raw)
 
 
