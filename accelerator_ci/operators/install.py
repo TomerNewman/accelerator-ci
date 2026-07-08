@@ -12,6 +12,35 @@ from accelerator_ci.shared.oc_runner import OcRunner
 logger = logging.getLogger(__name__)
 
 
+def _csv_matches_package(csv_name: str, package: str) -> bool:
+    """True if csv_name belongs to package (e.g. 'gpu-pkg.v1.2' matches 'gpu-pkg').
+
+    OLM CSVs use a dot to separate the package name from the version
+    (e.g. 'gpu-operator.v24.3.0'), so we only accept '.' as a separator.
+    """
+    if not csv_name.startswith(package):
+        return False
+    suffix = csv_name[len(package):]
+    return suffix == "" or suffix[0] == "."
+
+
+def is_operator_installed(oc: OcRunner, namespace: str, package: str) -> bool:
+    """Return True if a CSV owned by *package* is Succeeded in *namespace*."""
+    r = oc.oc("get", "csv", "-n", namespace, "-o", "json", timeout=15)
+    if r.returncode != 0:
+        return False
+    try:
+        items = json.loads(r.stdout or "{}").get("items", [])
+    except json.JSONDecodeError:
+        return False
+    for csv in items:
+        phase = (csv.get("status") or {}).get("phase", "")
+        csv_name = (csv.get("metadata") or {}).get("name", "")
+        if _csv_matches_package(csv_name, package) and phase == "Succeeded":
+            return True
+    return False
+
+
 def ensure_namespace(oc: OcRunner, name: str) -> None:
     r = oc.oc("get", "namespace", name, timeout=10)
     if r.returncode == 0:

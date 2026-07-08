@@ -11,6 +11,7 @@ from accelerator_ci.operators.install import (
     create_operator_group,
     create_subscription,
     approve_install_plan,
+    is_operator_installed,
     wait_for_csv,
     wait_for_csv_by_name,
     wait_for_subscription_installed,
@@ -55,6 +56,67 @@ def _no_sleep(monkeypatch):
 
     monkeypatch.setattr(mod.time, "sleep", lambda _: None)
     monkeypatch.setattr(mod.time, "monotonic", fake_monotonic)
+
+
+def _csv_list(*csvs: tuple[str, str]) -> str:
+    """Build JSON with CSV items. Each csv is (name, phase)."""
+    items = []
+    for name, phase in csvs:
+        items.append({
+            "metadata": {"name": name},
+            "status": {"phase": phase},
+        })
+    return json.dumps({"items": items})
+
+
+class TestIsOperatorInstalled:
+    def test_found_and_succeeded(self):
+        oc = MockOcRunner()
+        oc.queue(rc=0, stdout=_csv_list(("gpu-pkg.v1.2", "Succeeded")))
+        assert is_operator_installed(oc, "ns", "gpu-pkg") is True
+
+    def test_found_but_failed(self):
+        oc = MockOcRunner()
+        oc.queue(rc=0, stdout=_csv_list(("gpu-pkg.v1.2", "Failed")))
+        assert is_operator_installed(oc, "ns", "gpu-pkg") is False
+
+    def test_found_but_installing(self):
+        oc = MockOcRunner()
+        oc.queue(rc=0, stdout=_csv_list(("gpu-pkg.v1.2", "Installing")))
+        assert is_operator_installed(oc, "ns", "gpu-pkg") is False
+
+    def test_different_package(self):
+        oc = MockOcRunner()
+        oc.queue(rc=0, stdout=_csv_list(("other-pkg.v1.0", "Succeeded")))
+        assert is_operator_installed(oc, "ns", "gpu-pkg") is False
+
+    def test_no_csvs(self):
+        oc = MockOcRunner()
+        oc.queue(rc=0, stdout=json.dumps({"items": []}))
+        assert is_operator_installed(oc, "ns", "gpu-pkg") is False
+
+    def test_api_error(self):
+        oc = MockOcRunner()
+        oc.queue(rc=1)
+        assert is_operator_installed(oc, "ns", "gpu-pkg") is False
+
+    def test_bad_json(self):
+        oc = MockOcRunner()
+        oc.queue(rc=0, stdout="not json")
+        assert is_operator_installed(oc, "ns", "gpu-pkg") is False
+
+    def test_multiple_csvs_one_match(self):
+        oc = MockOcRunner()
+        oc.queue(rc=0, stdout=_csv_list(
+            ("nfd.v1.0", "Succeeded"),
+            ("gpu-pkg.v2.0", "Succeeded"),
+        ))
+        assert is_operator_installed(oc, "ns", "gpu-pkg") is True
+
+    def test_no_false_positive_on_prefix_overlap(self):
+        oc = MockOcRunner()
+        oc.queue(rc=0, stdout=_csv_list(("gpu-pkg-extra.v1.0", "Succeeded")))
+        assert is_operator_installed(oc, "ns", "gpu-pkg") is False
 
 
 class TestEnsureNamespace:

@@ -53,6 +53,7 @@ PATCHED_DEPS = [
     "accelerator_ci.operators.orchestrator.wait_for_mcp_updated",
     "accelerator_ci.operators.orchestrator.configure_internal_registry",
     "accelerator_ci.operators.orchestrator.verify_required_operators",
+    "accelerator_ci.operators.orchestrator.is_operator_installed",
     "accelerator_ci.operators.orchestrator.ensure_namespace",
     "accelerator_ci.operators.orchestrator.create_operator_group",
     "accelerator_ci.operators.orchestrator.create_subscription",
@@ -70,6 +71,7 @@ def mocks(monkeypatch):
         monkeypatch.setattr(target, m)
         short_name = target.rsplit(".", 1)[1]
         result[short_name] = m
+    result["is_operator_installed"].return_value = False
     return result
 
 
@@ -115,6 +117,39 @@ class TestInstallOperators:
         vendor.pre_operator_setup.assert_called_once_with(oc, {"key": "val"}, "master")
         vendor.post_operator_setup.assert_called_once()
         vendor.wait_for_gpu_ready.assert_called_once()
+
+    def test_skips_already_installed_operator(self, mocks):
+        oc = FakeOcRunner()
+        mocks["is_operator_installed"].return_value = True
+
+        install_operators(oc, FakeVendor(), {})
+
+        mocks["ensure_namespace"].assert_not_called()
+        mocks["create_subscription"].assert_not_called()
+        mocks["wait_for_csv"].assert_not_called()
+
+    def test_mixed_installed_and_new(self, mocks):
+        """Two operators: first already installed, second needs install."""
+        class TwoOpVendor(FakeVendor):
+            def get_operators(self, vendor_config):
+                return [
+                    OperatorSpec(
+                        name="nfd", package="nfd-pkg",
+                        namespace="nfd-ns", catalog="rh", channel="stable",
+                    ),
+                    OperatorSpec(
+                        name="gpu", package="gpu-pkg",
+                        namespace="gpu-ns", catalog="certified", channel="v24",
+                    ),
+                ]
+
+        mocks["is_operator_installed"].side_effect = [True, False]
+
+        oc = FakeOcRunner()
+        install_operators(oc, TwoOpVendor(), {})
+
+        mocks["ensure_namespace"].assert_called_once_with(oc, "gpu-ns")
+        mocks["create_subscription"].assert_called_once()
 
 
 class TestCleanupOperators:

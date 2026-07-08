@@ -124,6 +124,12 @@ Examples:
         help="Use an existing cluster instead of provisioning one. "
              "Skips deploy/delete; other commands run against this kubeconfig.",
     )
+    parser.add_argument(
+        "--json-progress",
+        dest="json_progress",
+        action="store_true",
+        help="Emit JSON lines for each workflow step (for CI integration).",
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="Action to perform")
     subparsers.add_parser("deploy", help="Deploy the OpenShift cluster")
@@ -446,6 +452,7 @@ def _dispatch(args, command: str, config) -> int:
             remote_user=config.remote.user,
             wait_timeout=config.wait_timeout,
             ssh_key=config.remote.ssh_key_path,
+            json_progress=args.json_progress,
         )
 
         artifact_dir = os.environ.get("ARTIFACT_DIR")
@@ -485,6 +492,7 @@ def _dispatch(args, command: str, config) -> int:
             vendor_config=config.operators.vendor_config,
             machine_config_role=machine_config_role,
             ocp_version=config.ocp_version,
+            json_progress=args.json_progress,
         )
 
         if hasattr(oc, "close"):
