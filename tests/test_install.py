@@ -45,7 +45,6 @@ class MockOcRunner:
 
 @pytest.fixture
 def _no_sleep(monkeypatch):
-    """Stub out time.sleep and make monotonic advance predictably."""
     import accelerator_ci.operators.install as mod
     clock = [0.0]
 
@@ -57,10 +56,6 @@ def _no_sleep(monkeypatch):
     monkeypatch.setattr(mod.time, "sleep", lambda _: None)
     monkeypatch.setattr(mod.time, "monotonic", fake_monotonic)
 
-
-# ---------------------------------------------------------------------------
-# ensure_namespace
-# ---------------------------------------------------------------------------
 
 class TestEnsureNamespace:
     def test_already_exists(self):
@@ -91,10 +86,6 @@ class TestEnsureNamespace:
         assert oc.calls[1][1].get("retries") == 0
 
 
-# ---------------------------------------------------------------------------
-# create_operator_group
-# ---------------------------------------------------------------------------
-
 class TestCreateOperatorGroup:
     def test_single_namespace_target(self):
         oc = MockOcRunner()
@@ -116,10 +107,6 @@ class TestCreateOperatorGroup:
         with pytest.raises(RuntimeError, match="server error"):
             create_operator_group(oc, "ns1", "og1")
 
-
-# ---------------------------------------------------------------------------
-# create_subscription
-# ---------------------------------------------------------------------------
 
 class TestCreateSubscription:
     def test_automatic_approval(self):
@@ -143,10 +130,6 @@ class TestCreateSubscription:
         assert spec["installPlanApproval"] == "Manual"
         assert spec["startingCSV"] == "pkg.v1.0"
 
-
-# ---------------------------------------------------------------------------
-# approve_install_plan
-# ---------------------------------------------------------------------------
 
 def _ip_list(csv_name: str, approved: bool, ip_name: str = "ip-1") -> str:
     return json.dumps({"items": [{
@@ -192,10 +175,6 @@ class TestApproveInstallPlan:
         approve_install_plan(oc, "ns", "csv.v1", timeout=30)
 
 
-# ---------------------------------------------------------------------------
-# wait_for_csv
-# ---------------------------------------------------------------------------
-
 @pytest.mark.usefixtures("_no_sleep")
 class TestWaitForCsv:
     def test_all_succeeded(self):
@@ -234,10 +213,6 @@ class TestWaitForCsv:
         oc.queue(rc=0, stdout="Succeeded")
         wait_for_csv(oc, "ns", timeout=30)
 
-
-# ---------------------------------------------------------------------------
-# wait_for_subscription_installed
-# ---------------------------------------------------------------------------
 
 def _sub_json(installed_csv: str = "", conditions: list | None = None) -> str:
     status: dict = {}
@@ -281,10 +256,6 @@ class TestWaitForSubscriptionInstalled:
         assert wait_for_subscription_installed(oc, "ns", "my-sub", timeout=30) == "pkg.v2"
 
 
-# ---------------------------------------------------------------------------
-# wait_for_csv_by_name
-# ---------------------------------------------------------------------------
-
 @pytest.mark.usefixtures("_no_sleep")
 class TestWaitForCsvByName:
     def test_succeeded(self):
@@ -317,10 +288,6 @@ class TestWaitForCsvByName:
         oc.queue(rc=0, stdout="Succeeded")
         wait_for_csv_by_name(oc, "ns", "csv.v1", timeout=30)
 
-
-# ---------------------------------------------------------------------------
-# wait_for_crd
-# ---------------------------------------------------------------------------
 
 @pytest.mark.usefixtures("_no_sleep")
 class TestWaitForCrd:
