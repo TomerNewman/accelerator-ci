@@ -139,6 +139,7 @@ Examples:
 
     subparsers.add_parser("cleanup", help="Remove GPU operator stack")
     subparsers.add_parser("must-gather", help="Collect diagnostic data")
+    subparsers.add_parser("status", help="Show cluster health and GPU resources")
 
     return parser.parse_args(argv)
 
@@ -170,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
 
     command = args.command
     if not command:
-        logger.error("Error: no command specified. Use one of: deploy, delete, operators, test-gpu, cleanup, must-gather")
+        logger.error("Error: no command specified. Use one of: deploy, delete, operators, test-gpu, cleanup, must-gather, status")
         return 1
 
     try:
@@ -361,6 +362,21 @@ def _dry_run_must_gather(args, config) -> None:
     logger.info("%s", "\n".join(lines))
 
 
+def _dry_run_status(args, config) -> None:
+    target = f"remote ({config.remote.user}@{config.remote.host})" if config.remote.host else "local"
+    lines = [
+        "Dry-run: status",
+        f"  Cluster: {config.cluster_name}",
+        f"  Target:  {target}",
+        "  Queries:",
+        "    - oc get clusterversion",
+        "    - oc get nodes",
+        "    - oc get csv -A",
+        "    - oc get nodes -o json (GPU allocatable)",
+    ]
+    logger.info("%s", "\n".join(lines))
+
+
 _DRY_RUN_HANDLERS = {
     "deploy": _dry_run_deploy,
     "delete": _dry_run_delete,
@@ -368,6 +384,7 @@ _DRY_RUN_HANDLERS = {
     "test-gpu": _dry_run_test_gpu,
     "cleanup": _dry_run_cleanup,
     "must-gather": _dry_run_must_gather,
+    "status": _dry_run_status,
 }
 
 
@@ -524,6 +541,15 @@ def _dispatch(args, command: str, config) -> int:
         else:
             kubeconfig = _resolve_kubeconfig(config.cluster_name, kc_override)
             return run_must_gather(kubeconfig=str(kubeconfig), artifact_dir=artifact_dir)
+
+    elif command == "status":
+        from accelerator_ci.cluster_provision.status import print_status
+
+        oc = _get_oc_runner(config, kubeconfig_override=kc_override)
+        rc = print_status(oc)
+        if hasattr(oc, "close"):
+            oc.close()
+        return rc
 
     else:
         logger.error("Unknown command: %s", command)

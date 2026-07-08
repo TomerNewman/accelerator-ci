@@ -31,7 +31,7 @@ class TestParseArgs:
         assert args.command == "delete"
 
     def test_all_commands(self):
-        for cmd in ["deploy", "delete", "operators", "test-gpu", "cleanup", "must-gather"]:
+        for cmd in ["deploy", "delete", "operators", "test-gpu", "cleanup", "must-gather", "status"]:
             args = parse_args(["--config", "c.yaml", cmd])
             assert args.command == cmd
 
@@ -228,6 +228,13 @@ class TestDryRun:
     def test_dry_run_cleanup_requires_vendor(self, config_file):
         rc = main(["--config", config_file, "--dry-run", "cleanup"])
         assert rc == 1
+
+    def test_dry_run_status(self, config_file, capsys):
+        rc = main(["--config", config_file, "--dry-run", "status"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Dry-run: status" in out
+        assert "clusterversion" in out
 
     def test_dry_run_deploy_skipped_with_kubeconfig(self, config_file, tmp_path, capsys):
         kc = tmp_path / "kubeconfig"
