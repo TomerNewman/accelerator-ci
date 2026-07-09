@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -22,6 +22,7 @@ class OperatorSpec:
     starting_csv: str | None = None
     manual_approval: bool = False
     all_namespaces: bool = False
+    depends_on: list[str] = field(default_factory=list)  # package names to wait for
 
     def __post_init__(self) -> None:
         if self.manual_approval and not self.starting_csv:

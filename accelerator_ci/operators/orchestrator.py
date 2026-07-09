@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, TYPE_CHECKING
 
 from accelerator_ci.operators.cluster_health import wait_for_cluster_stability, wait_for_mcp_updated
@@ -20,7 +22,7 @@ from accelerator_ci.shared.progress import ProgressTracker
 
 if TYPE_CHECKING:
     from accelerator_ci.shared.oc_runner import OcRunner
-    from accelerator_ci.vendors.base import VendorProfile
+    from accelerator_ci.vendors.base import OperatorSpec, VendorProfile
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,134 @@ DEFAULT_TIMEOUTS = {
     "cluster_stability": 900,
     "gpu_ready": 1800,
 }
+
+
+def _validate_dependencies(ops: list[OperatorSpec]) -> None:
+    """Raise if any depends_on references an unknown package or creates a cycle."""
+    known = {op.package for op in ops}
+    for op in ops:
+        for dep in op.depends_on:
+            if dep not in known:
+                raise ValueError(
+                    f"Operator '{op.name}' depends on unknown package '{dep}'. "
+                    f"Known packages: {sorted(known)}"
+                )
+
+    visited: set[str] = set()
+    path: set[str] = set()
+    by_pkg = {op.package: op for op in ops}
+
+    def _walk(pkg: str) -> None:
+        if pkg in path:
+            raise ValueError(f"Dependency cycle detected involving '{pkg}'")
+        if pkg in visited:
+            return
+        path.add(pkg)
+        for dep in by_pkg[pkg].depends_on:
+            _walk(dep)
+        path.discard(pkg)
+        visited.add(pkg)
+
+    for op in ops:
+        _walk(op.package)
+
+
+def _install_single_operator(
+    oc: OcRunner,
+    op: OperatorSpec,
+    operator_timeout: int,
+) -> None:
+    ensure_namespace(oc, op.namespace)
+    create_operator_group(oc, op.namespace, op.name, all_namespaces=op.all_namespaces)
+    create_subscription(
+        oc,
+        op.namespace,
+        op.name,
+        op.package,
+        op.catalog,
+        op.channel,
+        starting_csv=op.starting_csv,
+        manual_approval=op.manual_approval,
+    )
+    if op.manual_approval and op.starting_csv:
+        approve_install_plan(oc, op.namespace, op.starting_csv, timeout=operator_timeout)
+        wait_for_csv_by_name(oc, op.namespace, op.starting_csv, timeout=operator_timeout)
+    else:
+        wait_for_csv(oc, op.namespace, timeout=operator_timeout)
+
+
+def _can_parallelize(ops: list[OperatorSpec]) -> bool:
+    return len(ops) > 1
+
+
+def _install_operators_parallel(
+    oc: OcRunner,
+    ops: list[OperatorSpec],
+    operator_timeout: int,
+    progress: ProgressTracker,
+    step_offset: int,
+) -> None:
+    """Install operators respecting depends_on, running independent ones concurrently."""
+    done_events: dict[str, threading.Event] = {op.package: threading.Event() for op in ops}
+    errors: dict[str, Exception] = {}
+    lock = threading.Lock()
+
+    op_step_index = {op.package: step_offset + i for i, op in enumerate(ops)}
+
+    def _worker(op: OperatorSpec) -> None:
+        for dep in op.depends_on:
+            done_events[dep].wait()
+            with lock:
+                if dep in errors:
+                    raise RuntimeError(
+                        f"Skipping '{op.name}': dependency '{dep}' failed"
+                    )
+
+        step_idx = op_step_index[op.package]
+        with lock:
+            progress.step(step_idx)
+
+        if is_operator_installed(oc, op.namespace, op.package):
+            logger.info("%s already installed and healthy — skipping", op.name)
+            done_events[op.package].set()
+            return
+
+        _install_single_operator(oc, op, operator_timeout)
+        done_events[op.package].set()
+
+    with ThreadPoolExecutor(max_workers=len(ops)) as pool:
+        futures = {pool.submit(_worker, op): op for op in ops}
+        for future in as_completed(futures):
+            op = futures[future]
+            try:
+                future.result()
+            except Exception as exc:
+                with lock:
+                    errors[op.package] = exc
+                done_events[op.package].set()
+
+    if errors:
+        names = [f"{pkg}: {exc}" for pkg, exc in errors.items()]
+        raise RuntimeError(
+            "Operator installation failed:\n  " + "\n  ".join(names)
+        )
+
+
+def _install_operators_sequential(
+    oc: OcRunner,
+    ops: list[OperatorSpec],
+    operator_timeout: int,
+    progress: ProgressTracker,
+    step_offset: int,
+) -> None:
+    for i, op in enumerate(ops):
+        progress.step(step_offset + i)
+
+        if is_operator_installed(oc, op.namespace, op.package):
+            logger.info("%s already installed and healthy — skipping", op.name)
+            continue
+
+        _install_single_operator(oc, op, operator_timeout)
 
 
 def install_operators(
@@ -47,6 +177,11 @@ def install_operators(
     t = {**DEFAULT_TIMEOUTS, **(timeouts or {})}
 
     ops = vendor.get_operators(vendor_config)
+
+    if any(op.depends_on for op in ops):
+        _validate_dependencies(ops)
+
+    parallel = _can_parallelize(ops)
 
     step_names = [
         "Verify prerequisites",
@@ -94,33 +229,18 @@ def install_operators(
         progress.step(step)
         wait_for_cluster_stability(oc, timeout=t["cluster_stability"])
 
-        for op in ops:
-            step += 1
-            progress.step(step)
-
-            if is_operator_installed(oc, op.namespace, op.package):
-                logger.info("%s already installed and healthy — skipping", op.name)
-                continue
-
-            ensure_namespace(oc, op.namespace)
-            create_operator_group(oc, op.namespace, op.name, all_namespaces=op.all_namespaces)
-            create_subscription(
-                oc,
-                op.namespace,
-                op.name,
-                op.package,
-                op.catalog,
-                op.channel,
-                starting_csv=op.starting_csv,
-                manual_approval=op.manual_approval,
+        operator_step_offset = step + 1
+        if parallel:
+            logger.info("Installing %d operators in parallel", len(ops))
+            _install_operators_parallel(
+                oc, ops, t["operator"], progress, operator_step_offset,
             )
-            if op.manual_approval and op.starting_csv:
-                approve_install_plan(oc, op.namespace, op.starting_csv, timeout=t["operator"])
-                wait_for_csv_by_name(oc, op.namespace, op.starting_csv, timeout=t["operator"])
-            else:
-                wait_for_csv(oc, op.namespace, timeout=t["operator"])
+        else:
+            _install_operators_sequential(
+                oc, ops, t["operator"], progress, operator_step_offset,
+            )
 
-        step += 1
+        step = operator_step_offset + len(ops)
         progress.step(step)
         vendor.post_operator_setup(oc, vendor_config, ocp_version)
 

@@ -38,6 +38,7 @@ class TestOperatorSpec:
         assert spec.starting_csv is None
         assert spec.manual_approval is False
         assert spec.all_namespaces is False
+        assert spec.depends_on == []
 
     def test_all_fields(self):
         spec = OperatorSpec(
