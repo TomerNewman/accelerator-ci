@@ -1,49 +1,64 @@
-# See README for field documentation.
-# Vendor-specific behavior is selected via --vendor-module on the CLI.
+# Accelerator CI — cluster configuration
+#
+# Only cluster_name and ocp_version are required.
+# For BYOC (--kubeconfig), that's all you need.
+# For kcli deploy, also set domain, pull_secret_path, and api_ip.
 
-ocp_version: "4.20"
-pull_secret_path: ~/keys/pull-secret.json
+# --- Required ---
 
 cluster_name: ocp
-domain: example.com
-ctlplanes: 1
+ocp_version: "4.17"
+
+# --- Required for deploy (not needed for --kubeconfig) ---
+
+domain: lab.local                    # must not be "example.com"
+pull_secret_path: ~/keys/pull-secret.json
+api_ip: "192.168.122.253"
+
+# --- Cluster topology ---
+
+ctlplanes: 1                         # 1 control plane + 0 workers = SNO
 workers: 0
 
 ctlplane:
-  numcpus: 6
-  memory: 18432
+  numcpus: 8
+  memory: 24576                      # MB
 
 worker:
   numcpus: 4
-  memory: 16384
+  memory: 16384                      # MB
 
-disk_size: 120
+disk_size: 120                       # GB
 network: default
-api_ip: "192.168.122.253"
+version_channel: stable
+wait_timeout: 3600                   # seconds
+
+# --- Remote deployment (null = local) ---
 
 remote:
-  host: null
+  host: null                         # set to deploy on a remote libvirt host
   user: root
-  ssh_key_path: null
+  ssh_key_path: null                 # e.g. ~/.ssh/id_rsa
+
+# --- PCI passthrough ---
 
 pci_devices: []
-wait_timeout: 3600
-version_channel: stable
+# pci_devices: [0000:41:00.0, 0000:42:00.0]
 
-# Informational vendor label (actual behavior comes from --vendor-module)
-vendor: ""
+# --- Operators ---
+# machine_config_role is "worker" by default; auto-set to "master" for SNO.
+# All other fields are vendor-specific and passed to the VendorProfile as a dict.
 
-# Must-gather diagnostics
+operators:
+  machine_config_role: worker
+  # gpu_operator_version: "24.3.0"
+  # driver_version: "550.127"
+
+# --- Must-gather ---
+
 must_gather:
   artifact_dir: ./must-gather-output
 
-# Post-deploy: GPU operator and dependencies via OLM.
-# Fields beyond machine_config_role are vendor-specific and passed as a
-# dict to the vendor profile's methods.
-operators:
-  machine_config_role: worker   # use "master" for Single Node OpenShift (SNO)
+# --- Informational ---
 
-  # Add vendor-specific fields here. They are passed as a dict
-  # to the vendor profile's methods. For example:
-  # gpu_operator_version: "1.4"
-  # driver_version: "30.20.1"
+vendor: ""                           # label only; actual profile loaded via --vendor-module

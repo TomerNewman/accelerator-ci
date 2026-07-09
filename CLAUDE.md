@@ -21,10 +21,16 @@ pip install -e .
 accelerator-ci --config cluster-config.yaml deploy
 accelerator-ci --config cluster-config.yaml --vendor-module my_vendor.profile operators
 accelerator-ci --config cluster-config.yaml --vendor-module my_vendor.profile test-gpu
+accelerator-ci --config cluster-config.yaml status
+accelerator-ci --config cluster-config.yaml --dry-run deploy
+
+# BYOC (skip deploy/delete, use existing cluster)
+accelerator-ci --config config.yaml --kubeconfig ~/.kube/config --vendor-module my_vendor.profile operators
 
 # Or via make
 make cluster-deploy CONFIG_FILE_PATH=cluster-config.yaml
 make cluster-operators CONFIG_FILE_PATH=cluster-config.yaml VENDOR_MODULE=my_vendor.profile
+make test
 ```
 
 ## Architecture
@@ -33,7 +39,7 @@ make cluster-operators CONFIG_FILE_PATH=cluster-config.yaml VENDOR_MODULE=my_ven
 
 Single top-level Python package, pip-installable via `pyproject.toml`. Vendor repos install it with `pip install git+https://...`.
 
-- **`cluster_provision/`** — Cluster lifecycle. `main.py` is the CLI entrypoint (installed as `accelerator-ci` console script). Dispatches commands: deploy, delete, operators, test-gpu, cleanup, must-gather.
+- **`cluster_provision/`** — Cluster lifecycle. `main.py` is the CLI entrypoint (installed as `accelerator-ci` console script). Dispatches commands: deploy, delete, operators, test-gpu, cleanup, must-gather, status. Config is validated with Pydantic.
 
 - **`operators/`** — Generic OLM installation framework:
   - `orchestrator.py` — Vendor-agnostic install flow, delegates to `VendorProfile`
