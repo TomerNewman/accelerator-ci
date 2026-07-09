@@ -452,7 +452,7 @@ def _dispatch(args, command: str, config) -> int:
             remote_host=config.remote.host,
             pci_devices=pci_devices,
             remote_user=config.remote.user,
-            wait_timeout=config.wait_timeout,
+            wait_timeout=config.timeouts.deploy,
             ssh_key=config.remote.ssh_key_path,
             json_progress=args.json_progress,
         )
@@ -488,12 +488,14 @@ def _dispatch(args, command: str, config) -> int:
         if config.ctlplanes == 1 and config.workers == 0:
             machine_config_role = "master"
 
+        timeouts = config.timeouts.model_dump(exclude={"deploy"})
         install_operators(
             oc,
             vendor=vendor,
             vendor_config=config.operators.vendor_config,
             machine_config_role=machine_config_role,
             ocp_version=config.ocp_version,
+            timeouts=timeouts,
             json_progress=args.json_progress,
         )
 

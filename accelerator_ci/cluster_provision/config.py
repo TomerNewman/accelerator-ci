@@ -42,6 +42,15 @@ class OperatorsConfig(BaseModel):
     vendor_config: dict[str, Any] = Field(default_factory=dict)
 
 
+class TimeoutsConfig(BaseModel):
+    prerequisite: int = 900
+    registry: int = 120
+    operator: int = 600
+    cluster_stability: int = 900
+    gpu_ready: int = 1800
+    deploy: int = 3600
+
+
 class MustGatherConfig(BaseModel):
     artifact_dir: str = "./must-gather-output"
 
@@ -74,6 +83,7 @@ class ClusterConfig(BaseModel):
     version_channel: str = "stable"
     vendor: str = ""
     operators: OperatorsConfig = Field(default_factory=OperatorsConfig)
+    timeouts: TimeoutsConfig = Field(default_factory=TimeoutsConfig)
     must_gather: MustGatherConfig = Field(default_factory=MustGatherConfig)
 
     @field_validator("pull_secret_path", mode="before")

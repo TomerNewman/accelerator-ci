@@ -31,7 +31,6 @@ worker:
 disk_size: 120                       # GB
 network: default
 version_channel: stable
-wait_timeout: 3600                   # seconds
 
 # --- Remote deployment (null = local) ---
 
@@ -53,6 +52,16 @@ operators:
   machine_config_role: worker
   # gpu_operator_version: "24.3.0"
   # driver_version: "550.127"
+
+# --- Timeouts (seconds) ---
+
+# timeouts:
+#   deploy: 3600              # cluster provisioning
+#   prerequisite: 900         # wait for marketplace/OLM operators
+#   registry: 120             # internal registry configuration
+#   operator: 600             # per-operator install + CSV readiness
+#   cluster_stability: 900    # node + ClusterOperator health
+#   gpu_ready: 1800           # GPU extended resources visible on nodes
 
 # --- Must-gather ---
 

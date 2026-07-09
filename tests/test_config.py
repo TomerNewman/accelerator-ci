@@ -171,6 +171,43 @@ class TestParseConfig:
             parse_config(raw)
 
 
+class TestTimeoutsConfig:
+    def test_defaults(self):
+        config = parse_config(MINIMAL_CONFIG)
+        assert config.timeouts.prerequisite == 900
+        assert config.timeouts.registry == 120
+        assert config.timeouts.operator == 600
+        assert config.timeouts.cluster_stability == 900
+        assert config.timeouts.gpu_ready == 1800
+        assert config.timeouts.deploy == 3600
+
+    def test_partial_override(self):
+        raw = {**MINIMAL_CONFIG, "timeouts": {"operator": 1200, "gpu_ready": 3600}}
+        config = parse_config(raw)
+        assert config.timeouts.operator == 1200
+        assert config.timeouts.gpu_ready == 3600
+        assert config.timeouts.prerequisite == 900
+
+    def test_full_override(self):
+        raw = {**MINIMAL_CONFIG, "timeouts": {
+            "prerequisite": 100,
+            "registry": 60,
+            "operator": 300,
+            "cluster_stability": 450,
+            "gpu_ready": 900,
+            "deploy": 1800,
+        }}
+        config = parse_config(raw)
+        assert config.timeouts.prerequisite == 100
+        assert config.timeouts.deploy == 1800
+
+    def test_missing_timeouts_section(self):
+        raw = {**MINIMAL_CONFIG}
+        raw.pop("timeouts", None)
+        config = parse_config(raw)
+        assert config.timeouts.operator == 600
+
+
 class TestValidateDeployConfig:
     _DEPLOY_CONFIG = {**MINIMAL_CONFIG, "domain": "lab.local"}
 
