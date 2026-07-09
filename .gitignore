@@ -16,3 +16,5 @@ venv/
 .DS_Store
 cluster-config.yaml
 must-gather-output/
+TODO.md
+openshift-install
