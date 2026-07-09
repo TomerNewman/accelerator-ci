@@ -143,10 +143,13 @@ def wait_for_csv(oc: OcRunner, namespace: str, timeout: int = 600) -> None:
         if all(p == "Succeeded" for p in phases):
             return
         if "Failed" in phases:
-            r2 = oc.oc("get", "csv", "-n", namespace, "-o", "yaml", timeout=10)
-            raise OperatorError(
-                f"CSV in {namespace} failed: {r2.stdout or 'check oc get csv -n ' + namespace}"
+            r2 = oc.oc(
+                "get", "csv", "-n", namespace, "-o",
+                "jsonpath={range .items[*]}{.metadata.name}: {.status.phase} - {.status.message}{'\\n'}{end}",
+                timeout=10,
             )
+            detail = (r2.stdout or "").strip() or f"check oc get csv -n {namespace}"
+            raise OperatorError(f"CSV in {namespace} failed:\n{detail}")
         logger.info("Waiting for operator CSV in %s... (%s)", namespace, phases)
         time.sleep(15)
     raise OperatorError(f"Timeout ({timeout}s) waiting for CSV in {namespace}")
@@ -201,8 +204,13 @@ def wait_for_csv_by_name(
             if phase == "Succeeded":
                 return
             if phase == "Failed":
-                r2 = oc.oc("get", "csv", csv_name, "-n", namespace, "-o", "yaml", timeout=10)
-                raise OperatorError(f"CSV {csv_name} failed: {r2.stdout or 'check oc get csv'}")
+                r2 = oc.oc(
+                    "get", "csv", csv_name, "-n", namespace, "-o",
+                    "jsonpath={.status.message}",
+                    timeout=10,
+                )
+                detail = (r2.stdout or "").strip() or f"check oc get csv {csv_name} -n {namespace}"
+                raise OperatorError(f"CSV {csv_name} failed: {detail}")
         time.sleep(10)
     raise OperatorError(f"Timeout ({timeout}s) waiting for CSV {csv_name} to reach Succeeded.")
 

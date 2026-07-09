@@ -74,7 +74,14 @@ def run_tests_remote(
         s.bind(("127.0.0.1", 0))
         local_port = s.getsockname()[1]
 
-    ssh_opts = list(SSH_BASE_OPTS_LIST)
+    ssh_opts = [
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "LogLevel=ERROR",
+        "-o", "ConnectTimeout=30",
+        "-o", "ControlMaster=no",
+        "-o", "ControlPath=none",
+    ]
     if ssh_key_path:
         ssh_opts += ["-i", ssh_key_path]
 

@@ -49,6 +49,7 @@ class Profile(VendorProfile):
                 namespace="metallb-system",
                 catalog="redhat-operators",
                 channel=vendor_config.get("metallb_channel", "stable"),
+                all_namespaces=True,
                 depends_on=["nfd", "kubernetes-nmstate-operator"],
             ),
         ]
@@ -70,10 +71,7 @@ class Profile(VendorProfile):
             "apiVersion": "nfd.openshift.io/v1",
             "kind": "NodeFeatureDiscovery",
             "metadata": {"name": "nfd-instance", "namespace": "openshift-nfd"},
-            "spec": {
-                "operand": {"image": ""},
-                "workerConfig": {"configData": ""},
-            },
+            "spec": {},
         }
         logger.info("Creating NodeFeatureDiscovery CR")
         oc.apply_yaml(json.dumps(nfd_cr))
