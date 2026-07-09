@@ -1,0 +1,14 @@
+# Example vendor configuration
+#
+# Use with: accelerator-ci --config examples/example_vendor/config.yaml \
+#               --vendor-module examples.example_vendor.profile operators
+
+cluster_name: example-cluster
+ocp_version: "4.17"
+
+# Operator channel overrides (optional)
+operators:
+  machine_config_role: worker
+  nfd_channel: stable
+  nmstate_channel: stable
+  metallb_channel: stable
