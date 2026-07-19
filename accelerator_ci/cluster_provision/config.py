@@ -51,6 +51,11 @@ class TimeoutsConfig(BaseModel):
     deploy: int = 3600
 
 
+class SnapshotConfig(BaseModel):
+    enabled: bool = False
+    max_cached: int = Field(default=3, ge=1)
+
+
 class MustGatherConfig(BaseModel):
     artifact_dir: str = "./must-gather-output"
 
@@ -84,6 +89,7 @@ class ClusterConfig(BaseModel):
     vendor: str = ""
     operators: OperatorsConfig = Field(default_factory=OperatorsConfig)
     timeouts: TimeoutsConfig = Field(default_factory=TimeoutsConfig)
+    snapshot: SnapshotConfig = Field(default_factory=SnapshotConfig)
     must_gather: MustGatherConfig = Field(default_factory=MustGatherConfig)
 
     @field_validator("pull_secret_path", mode="before")

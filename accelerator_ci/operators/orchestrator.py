@@ -172,11 +172,18 @@ def install_operators(
     ocp_version: str | None = None,
     timeouts: dict[str, int] | None = None,
     json_progress: bool = False,
+    operators_override: list | None = None,
+    skip_post_install: bool = False,
 ) -> None:
-    """Use machine_config_role="master" for SNO."""
+    """Use machine_config_role="master" for SNO.
+
+    If operators_override is provided, installs those instead of vendor.get_operators().
+    If skip_post_install is True, skips post_operator_setup and wait_for_gpu_ready
+    (used for base operator installs before snapshotting).
+    """
     t = {**DEFAULT_TIMEOUTS, **(timeouts or {})}
 
-    ops = vendor.get_operators(vendor_config)
+    ops = operators_override if operators_override is not None else vendor.get_operators(vendor_config)
 
     if any(op.depends_on for op in ops):
         _validate_dependencies(ops)
@@ -193,11 +200,12 @@ def install_operators(
     ]
     for op in ops:
         step_names.append(f"Install {op.name}")
-    step_names += [
-        "Vendor post-operator setup",
-        "Wait for cluster stability",
-        "Wait for GPU readiness",
-    ]
+    if not skip_post_install:
+        step_names += [
+            "Vendor post-operator setup",
+            "Wait for cluster stability",
+            "Wait for GPU readiness",
+        ]
 
     progress = ProgressTracker(
         f"{vendor.display_name} operators", step_names, json_output=json_progress,
@@ -241,16 +249,18 @@ def install_operators(
             )
 
         step = operator_step_offset + len(ops)
-        progress.step(step)
-        vendor.post_operator_setup(oc, vendor_config, ocp_version)
 
-        step += 1
-        progress.step(step)
-        wait_for_cluster_stability(oc, timeout=t["cluster_stability"])
+        if not skip_post_install:
+            progress.step(step)
+            vendor.post_operator_setup(oc, vendor_config, ocp_version)
 
-        step += 1
-        progress.step(step)
-        vendor.wait_for_gpu_ready(oc, timeout=t["gpu_ready"])
+            step += 1
+            progress.step(step)
+            wait_for_cluster_stability(oc, timeout=t["cluster_stability"])
+
+            step += 1
+            progress.step(step)
+            vendor.wait_for_gpu_ready(oc, timeout=t["gpu_ready"])
 
         progress.done()
 

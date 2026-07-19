@@ -63,6 +63,15 @@ operators:
 #   cluster_stability: 900    # node + ClusterOperator health
 #   gpu_ready: 1800           # GPU extended resources visible on nodes
 
+# --- Snapshot caching (SNO + remote only) ---
+# When enabled, the first deploy creates a virsh snapshot after base
+# operators are installed. Subsequent deploys with the same OCP major.minor
+# restore from snapshot (~2 min) instead of redeploying (~35 min).
+
+# snapshot:
+#   enabled: true
+#   max_cached: 3             # how many OCP versions to keep cached
+
 # --- Must-gather ---
 
 must_gather:

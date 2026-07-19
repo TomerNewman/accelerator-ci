@@ -148,6 +148,7 @@ Examples:
     subparsers.add_parser("cleanup", help="Remove GPU operator stack")
     subparsers.add_parser("must-gather", help="Collect diagnostic data")
     subparsers.add_parser("status", help="Show cluster health and GPU resources")
+    subparsers.add_parser("stop", help="Stop cluster VMs (preserves snapshots for cache reuse)")
 
     return parser.parse_args(argv)
 
@@ -385,6 +386,21 @@ def _dry_run_status(args, config) -> None:
     logger.info("%s", "\n".join(lines))
 
 
+def _dry_run_stop(args, config) -> None:
+    if not config.remote.host:
+        logger.info("Dry-run: stop — requires a remote host (not configured)")
+        return
+    lines = [
+        "Dry-run: stop",
+        f"  Cluster: {config.cluster_name}",
+        f"  Remote:  {config.remote.user}@{config.remote.host}",
+        f"  VMs to shut down: {config.ctlplanes} ctlplane(s)",
+        "  Operations:",
+        "    - virsh shutdown <cluster>-ctlplane-N",
+    ]
+    logger.info("%s", "\n".join(lines))
+
+
 _DRY_RUN_HANDLERS = {
     "deploy": _dry_run_deploy,
     "delete": _dry_run_delete,
@@ -393,7 +409,170 @@ _DRY_RUN_HANDLERS = {
     "cleanup": _dry_run_cleanup,
     "must-gather": _dry_run_must_gather,
     "status": _dry_run_status,
+    "stop": _dry_run_stop,
 }
+
+
+def _deploy_standard(args, config, ocp_version: str) -> None:
+    """Standard deploy without snapshot caching."""
+    pci_devices = list(config.pci_devices)
+
+    if args.vendor_module:
+        vendor = _load_vendor_profile(args.vendor_module)
+        host_args = dict(
+            host=config.remote.host or "localhost",
+            user=config.remote.user,
+            ssh_key=config.remote.ssh_key_path,
+            vendor_config=config.operators.vendor_config,
+        )
+        vendor.host_setup(**host_args)
+        extra_devices = vendor.get_pci_devices(**host_args)
+        if extra_devices:
+            pci_devices.extend(extra_devices)
+            logger.info("Vendor provided %d PCI device(s): %s", len(extra_devices), extra_devices)
+
+    params = get_kcli_params(config, ocp_version)
+
+    print_config(params)
+    if pci_devices:
+        logger.info("PCI Passthrough Devices: %s", pci_devices)
+    logger.info("Config file: %s", args.config_file)
+
+    deploy_cluster(
+        params=params,
+        remote_host=config.remote.host,
+        pci_devices=pci_devices,
+        remote_user=config.remote.user,
+        wait_timeout=config.timeouts.deploy,
+        ssh_key=config.remote.ssh_key_path,
+        json_progress=args.json_progress,
+    )
+
+
+def _deploy_with_snapshot(args, config, ocp_version: str) -> None:
+    """Deploy via snapshot restore (cache hit) or full deploy + snapshot (cache miss)."""
+    from accelerator_ci.cluster_provision.snapshot import (
+        find_snapshot, create_snapshot, revert_snapshot,
+        snapshot_cluster_name, stop_running_clusters, evict_cached_clusters,
+    )
+    from accelerator_ci.cluster_provision.vm import (
+        attach_pci_devices, detach_all_pci_devices, shutdown_vms, start_vms,
+    )
+    from accelerator_ci.shared.ssh import set_ssh_key_path
+
+    host = config.remote.host
+    user = config.remote.user
+
+    cluster_name = snapshot_cluster_name(config.cluster_name, ocp_version)
+    base_name = config.cluster_name
+    vm_name = f"{cluster_name}-ctlplane-0"
+    kubeconfig = _kubeconfig_path(cluster_name)
+
+    if config.remote.ssh_key_path:
+        set_ssh_key_path(config.remote.ssh_key_path)
+
+    logger.info("Deploy with snapshot caching (cluster: %s, OCP: %s, max cached: %d)",
+                cluster_name, ocp_version, config.snapshot.max_cached)
+
+    if find_snapshot(host, user, vm_name, ocp_version):
+        logger.info("Snapshot found for OCP %s — restoring", ocp_version)
+
+        stop_running_clusters(host, user, base_name, exclude=cluster_name)
+        revert_snapshot(host, user, vm_name, ocp_version, str(kubeconfig))
+
+        pci_devices = list(config.pci_devices)
+        if args.vendor_module:
+            vendor = _load_vendor_profile(args.vendor_module)
+            extra = vendor.get_pci_devices(
+                host=host, user=user,
+                ssh_key=config.remote.ssh_key_path,
+                vendor_config=config.operators.vendor_config,
+            )
+            pci_devices.extend(extra)
+
+        if pci_devices:
+            attach_pci_devices(host, user, vm_name, pci_devices)
+        else:
+            start_vms(host, user, cluster_name, config.ctlplanes)
+
+    else:
+        logger.info("No snapshot for OCP %s — full deploy", ocp_version)
+
+        stop_running_clusters(host, user, base_name)
+        evict_cached_clusters(
+            host, user, base_name,
+            max_cached=config.snapshot.max_cached,
+            exclude=cluster_name,
+        )
+
+        if args.vendor_module:
+            vendor = _load_vendor_profile(args.vendor_module)
+            host_args = dict(
+                host=host,
+                user=user,
+                ssh_key=config.remote.ssh_key_path,
+                vendor_config=config.operators.vendor_config,
+            )
+            vendor.host_setup(**host_args)
+
+        params = get_kcli_params(config, ocp_version)
+        params["cluster"] = cluster_name
+
+        deploy_cluster(
+            params=params,
+            remote_host=host,
+            pci_devices=None,
+            remote_user=user,
+            wait_timeout=config.timeouts.deploy,
+            ssh_key=config.remote.ssh_key_path,
+            json_progress=args.json_progress,
+        )
+
+        # Install base operators before snapshotting
+        if args.vendor_module:
+            base_ops = vendor.get_base_operators(config.operators.vendor_config)
+            if base_ops:
+                from accelerator_ci.operators.orchestrator import install_operators
+                oc = _get_oc_runner(config, kubeconfig_override=str(kubeconfig))
+
+                machine_config_role = config.operators.machine_config_role
+                if config.ctlplanes == 1 and config.workers == 0:
+                    machine_config_role = "master"
+
+                logger.info("Installing %d base operator(s) before snapshot", len(base_ops))
+                install_operators(
+                    oc, vendor=vendor,
+                    vendor_config=config.operators.vendor_config,
+                    machine_config_role=machine_config_role,
+                    ocp_version=ocp_version,
+                    json_progress=args.json_progress,
+                    operators_override=base_ops,
+                    skip_post_install=True,
+                )
+                if hasattr(oc, "close"):
+                    oc.close()
+
+        # Snapshot the clean state
+        logger.info("Creating snapshot")
+        shutdown_vms(host, user, cluster_name, config.ctlplanes)
+        detach_all_pci_devices(host, user, vm_name)
+        create_snapshot(host, user, vm_name, ocp_version, str(kubeconfig))
+
+        pci_devices = list(config.pci_devices)
+        if args.vendor_module:
+            extra = vendor.get_pci_devices(
+                host=host, user=user,
+                ssh_key=config.remote.ssh_key_path,
+                vendor_config=config.operators.vendor_config,
+            )
+            pci_devices.extend(extra)
+
+        if pci_devices:
+            attach_pci_devices(host, user, vm_name, pci_devices)
+        else:
+            start_vms(host, user, cluster_name, config.ctlplanes)
+
+    logger.info("Deploy (snapshot) completed — cluster: %s", cluster_name)
 
 
 def _dispatch(args, command: str, config) -> int:
@@ -424,38 +603,19 @@ def _dispatch(args, command: str, config) -> int:
 
         ocp_version = update_version_to_latest_patch(config.ocp_version, config.version_channel)
 
-        pci_devices = list(config.pci_devices)
+        is_sno = config.ctlplanes == 1 and config.workers == 0
+        use_snapshot = config.snapshot.enabled and is_sno and config.remote.host
 
-        if args.vendor_module:
-            vendor = _load_vendor_profile(args.vendor_module)
-            host_args = dict(
-                host=config.remote.host or "localhost",
-                user=config.remote.user,
-                ssh_key=config.remote.ssh_key_path,
-                vendor_config=config.operators.vendor_config,
-            )
-            vendor.host_setup(**host_args)
-            extra_devices = vendor.get_pci_devices(**host_args)
-            if extra_devices:
-                pci_devices.extend(extra_devices)
-                logger.info("Vendor provided %d PCI device(s): %s", len(extra_devices), extra_devices)
+        if config.snapshot.enabled and not use_snapshot:
+            if not is_sno:
+                logger.warning("Snapshot caching is only supported for SNO. Falling back to full deploy.")
+            elif not config.remote.host:
+                logger.warning("Snapshot caching requires a remote host. Falling back to full deploy.")
 
-        params = get_kcli_params(config, ocp_version)
-
-        print_config(params)
-        if pci_devices:
-            logger.info("PCI Passthrough Devices: %s", pci_devices)
-        logger.info("Config file: %s", args.config_file)
-
-        deploy_cluster(
-            params=params,
-            remote_host=config.remote.host,
-            pci_devices=pci_devices,
-            remote_user=config.remote.user,
-            wait_timeout=config.timeouts.deploy,
-            ssh_key=config.remote.ssh_key_path,
-            json_progress=args.json_progress,
-        )
+        if use_snapshot:
+            _deploy_with_snapshot(args, config, ocp_version)
+        else:
+            _deploy_standard(args, config, ocp_version)
 
         artifact_dir = os.environ.get("ARTIFACT_DIR")
         if artifact_dir:
@@ -562,6 +722,30 @@ def _dispatch(args, command: str, config) -> int:
         if hasattr(oc, "close"):
             oc.close()
         return rc
+
+    elif command == "stop":
+        if kc_override:
+            logger.info("Skipping stop — using external cluster")
+            return 0
+
+        if not config.remote.host:
+            raise RuntimeError("stop requires a remote host configured")
+
+        from accelerator_ci.cluster_provision.vm import shutdown_vms
+        from accelerator_ci.cluster_provision.snapshot import snapshot_cluster_name
+        from accelerator_ci.shared.ssh import set_ssh_key_path
+
+        if config.remote.ssh_key_path:
+            set_ssh_key_path(config.remote.ssh_key_path)
+
+        cluster_name = config.cluster_name
+        if config.snapshot.enabled:
+            ocp_version = config.ocp_version
+            cluster_name = snapshot_cluster_name(config.cluster_name, ocp_version)
+
+        logger.info("Stopping cluster VMs (preserving snapshots)")
+        shutdown_vms(config.remote.host, config.remote.user, cluster_name, config.ctlplanes)
+        logger.info("Cluster VMs stopped")
 
     else:
         logger.error("Unknown command: %s", command)

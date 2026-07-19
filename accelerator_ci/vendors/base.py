@@ -71,6 +71,15 @@ class VendorProfile(ABC):
 
     # --- Optional (sensible defaults) ---
 
+    def get_base_operators(self, vendor_config: dict[str, Any]) -> list[OperatorSpec]:
+        """Operators installed before snapshotting (cached across runs).
+
+        Override to split version-independent operators (NFD, KMM, etc.)
+        from the main GPU operator. Default returns empty list, meaning
+        all operators from get_operators() run post-snapshot.
+        """
+        return []
+
     def pre_operator_setup(
         self, oc: OcRunner, vendor_config: dict[str, Any], machine_config_role: str,
     ) -> None:

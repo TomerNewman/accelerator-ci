@@ -54,6 +54,25 @@ class Profile(VendorProfile):
             ),
         ]
 
+    def get_base_operators(self, vendor_config: dict[str, Any]) -> list[OperatorSpec]:
+        """NFD and NMState are cached in the snapshot; MetalLB installs fresh."""
+        return [
+            OperatorSpec(
+                name="nfd",
+                package="nfd",
+                namespace="openshift-nfd",
+                catalog="redhat-operators",
+                channel=vendor_config.get("nfd_channel", "stable"),
+            ),
+            OperatorSpec(
+                name="nmstate",
+                package="kubernetes-nmstate-operator",
+                namespace="openshift-nmstate",
+                catalog="redhat-operators",
+                channel=vendor_config.get("nmstate_channel", "stable"),
+            ),
+        ]
+
     def pre_operator_setup(
         self, oc: OcRunner, vendor_config: dict[str, Any], machine_config_role: str,
     ) -> None:
