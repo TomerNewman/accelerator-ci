@@ -227,15 +227,19 @@ def install_operators(
 
         step += 1
         progress.step(step)
-        vendor.pre_operator_setup(oc, vendor_config, machine_config_role)
+        applied_mc = vendor.pre_operator_setup(oc, vendor_config, machine_config_role)
 
-        step += 1
-        progress.step(step)
-        wait_for_mcp_updated(oc)
+        if applied_mc:
+            step += 1
+            progress.step(step)
+            wait_for_mcp_updated(oc)
 
-        step += 1
-        progress.step(step)
-        wait_for_cluster_stability(oc, timeout=t["cluster_stability"])
+            step += 1
+            progress.step(step)
+            wait_for_cluster_stability(oc, timeout=t["cluster_stability"])
+        else:
+            logger.info("No MachineConfigs applied — skipping MCP wait")
+            step += 2
 
         operator_step_offset = step + 1
         if parallel:

@@ -64,6 +64,7 @@ def ssh_cmd(
     command: str,
     check: bool = True,
     timeout: int = 300,
+    input: str | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = ["ssh", *_ssh_opts_list(), f"{user}@{host}", command]
     try:
@@ -73,6 +74,7 @@ def ssh_cmd(
             capture_output=True,
             text=True,
             timeout=timeout,
+            input=input,
         )
     except subprocess.TimeoutExpired:
         logger.warning("SSH command timed out after %ds: %s", timeout, command[:80])

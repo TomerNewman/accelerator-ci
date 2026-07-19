@@ -143,13 +143,14 @@ class TestRemoteOcRunner:
         assert result.stdout == "nodes"
 
     @patch("accelerator_ci.shared.oc_runner.ssh_cmd")
-    @patch("accelerator_ci.shared.oc_runner.scp_cmd")
-    def test_apply_yaml_scp_and_apply(self, mock_scp, mock_ssh):
+    def test_apply_yaml(self, mock_ssh):
         mock_ssh.return_value = _result(0)
         runner = RemoteOcRunner("host", "root", "/root/kubeconfig")
         runner.apply_yaml("kind: Pod")
-        mock_scp.assert_called_once()
-        assert mock_ssh.call_count >= 1
+        mock_ssh.assert_called_once()
+        call_kwargs = mock_ssh.call_args
+        assert "oc apply -f -" in call_kwargs[0][2]
+        assert call_kwargs[1]["input"] == "kind: Pod"
 
     @patch("accelerator_ci.shared.oc_runner.close_ssh_multiplexing")
     def test_close(self, mock_close):

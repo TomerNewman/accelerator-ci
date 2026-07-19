@@ -7,6 +7,7 @@ import logging
 import time
 
 from accelerator_ci.operators.errors import OperatorError
+from accelerator_ci.shared import adaptive_sleep
 from accelerator_ci.shared.oc_runner import OcRunner
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,7 @@ def approve_install_plan(
     oc: OcRunner, namespace: str, csv_name: str, timeout: int = 300
 ) -> None:
     start = time.monotonic()
+    sleeper = adaptive_sleep(3, 1.5, 10)
     while time.monotonic() - start < timeout:
         r = oc.oc(
             "get", "installplan", "-n", namespace, "-o", "json",
@@ -122,23 +124,24 @@ def approve_install_plan(
                         logger.warning("Patch failed (rc=%d): %s, retrying...", patch_r.returncode, patch_r.stderr or patch_r.stdout)
                         break
                     return
-        time.sleep(10)
+        next(sleeper)
     raise OperatorError(f"Timeout ({timeout}s) waiting for InstallPlan for {csv_name}")
 
 
 def wait_for_csv(oc: OcRunner, namespace: str, timeout: int = 600) -> None:
     start = time.monotonic()
+    sleeper = adaptive_sleep(5, 1.5, 15)
     while time.monotonic() - start < timeout:
         r = oc.oc(
             "get", "csv", "-n", namespace, "-o", "jsonpath={.items[*].status.phase}",
             timeout=30,
         )
         if r.returncode != 0:
-            time.sleep(15)
+            next(sleeper)
             continue
         phases = (r.stdout or "").split()
         if not phases:
-            time.sleep(15)
+            next(sleeper)
             continue
         if all(p == "Succeeded" for p in phases):
             return
@@ -151,7 +154,7 @@ def wait_for_csv(oc: OcRunner, namespace: str, timeout: int = 600) -> None:
             detail = (r2.stdout or "").strip() or f"check oc get csv -n {namespace}"
             raise OperatorError(f"CSV in {namespace} failed:\n{detail}")
         logger.info("Waiting for operator CSV in %s... (%s)", namespace, phases)
-        time.sleep(15)
+        next(sleeper)
     raise OperatorError(f"Timeout ({timeout}s) waiting for CSV in {namespace}")
 
 
@@ -159,18 +162,19 @@ def wait_for_subscription_installed(
     oc: OcRunner, namespace: str, subscription_name: str, timeout: int = 600
 ) -> str:
     start = time.monotonic()
+    sleeper = adaptive_sleep(3, 1.5, 10)
     while time.monotonic() - start < timeout:
         r = oc.oc(
             "get", "subscription", subscription_name, "-n", namespace, "-o", "json",
             timeout=15,
         )
         if r.returncode != 0:
-            time.sleep(10)
+            next(sleeper)
             continue
         try:
             sub = json.loads(r.stdout or "{}")
         except json.JSONDecodeError:
-            time.sleep(10)
+            next(sleeper)
             continue
         conditions = (sub.get("status") or {}).get("conditions") or []
         for c in conditions:
@@ -183,7 +187,7 @@ def wait_for_subscription_installed(
         if installed:
             return installed
         logger.info("Waiting for subscription %s to resolve...", subscription_name)
-        time.sleep(10)
+        next(sleeper)
     raise OperatorError(
         f"Timeout ({timeout}s) waiting for subscription {subscription_name} to install (no installedCSV)."
     )
@@ -193,6 +197,7 @@ def wait_for_csv_by_name(
     oc: OcRunner, namespace: str, csv_name: str, timeout: int = 600
 ) -> None:
     start = time.monotonic()
+    sleeper = adaptive_sleep(5, 1.5, 10)
     while time.monotonic() - start < timeout:
         r = oc.oc(
             "get", "csv", csv_name, "-n", namespace,
@@ -211,12 +216,13 @@ def wait_for_csv_by_name(
                 )
                 detail = (r2.stdout or "").strip() or f"check oc get csv {csv_name} -n {namespace}"
                 raise OperatorError(f"CSV {csv_name} failed: {detail}")
-        time.sleep(10)
+        next(sleeper)
     raise OperatorError(f"Timeout ({timeout}s) waiting for CSV {csv_name} to reach Succeeded.")
 
 
 def wait_for_crd(oc: OcRunner, crd_name: str, timeout: int = 120) -> None:
     start = time.monotonic()
+    sleeper = adaptive_sleep(3, 1.5, 5)
     while time.monotonic() - start < timeout:
         r = oc.oc(
             "get", "crd", crd_name,
@@ -225,5 +231,5 @@ def wait_for_crd(oc: OcRunner, crd_name: str, timeout: int = 120) -> None:
         )
         if r.returncode == 0 and (r.stdout or "").strip() == "True":
             return
-        time.sleep(5)
+        next(sleeper)
     raise OperatorError(f"Timeout ({timeout}s) waiting for CRD {crd_name}.")

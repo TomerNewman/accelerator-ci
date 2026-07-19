@@ -6,6 +6,7 @@ import logging
 import time
 
 from accelerator_ci.operators.errors import OperatorError
+from accelerator_ci.shared import adaptive_sleep
 from accelerator_ci.shared.oc_runner import OcRunner
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ def wait_for_cluster_stability(
     """Tolerates temporary API unavailability during SNO reboots."""
     logger.info("Waiting for cluster stability...")
     start = time.monotonic()
+    sleeper = adaptive_sleep(5, 1.5, poll_interval)
     while time.monotonic() - start < timeout:
         elapsed = int(time.monotonic() - start)
         issues: list[str] = []
@@ -32,7 +34,7 @@ def wait_for_cluster_stability(
         )
         if r.returncode != 0:
             logger.info("API not reachable (%ds)...", elapsed)
-            time.sleep(poll_interval)
+            next(sleeper)
             continue
         for line in (r.stdout or "").strip().splitlines():
             parts = line.split()
@@ -50,7 +52,7 @@ def wait_for_cluster_stability(
         )
         if r.returncode != 0:
             logger.info("Cannot check ClusterOperators (%ds)...", elapsed)
-            time.sleep(poll_interval)
+            next(sleeper)
             continue
         for line in (r.stdout or "").strip().splitlines():
             parts = line.split()
@@ -72,7 +74,7 @@ def wait_for_cluster_stability(
         if len(issues) > 3:
             summary += f" (+{len(issues) - 3} more)"
         logger.info("%s (%ds)...", summary, elapsed)
-        time.sleep(poll_interval)
+        next(sleeper)
 
     raise OperatorError(
         f"Cluster did not stabilize within {timeout}s. "
@@ -89,6 +91,7 @@ def wait_for_mcp_updated(
     logger.info("Waiting for MachineConfigPool to finish updating...")
     start = time.monotonic()
     saw_updating = False
+    sleeper = adaptive_sleep(5, 1.5, poll_interval)
     while time.monotonic() - start < timeout:
         elapsed = int(time.monotonic() - start)
         r = oc.oc(
@@ -103,7 +106,7 @@ def wait_for_mcp_updated(
         if r.returncode != 0:
             saw_updating = True
             logger.info("API not reachable (node likely rebooting) (%ds)...", elapsed)
-            time.sleep(poll_interval)
+            next(sleeper)
             continue
 
         all_updated = True
@@ -131,12 +134,12 @@ def wait_for_mcp_updated(
             else:
                 if elapsed < 60:
                     logger.debug("MCP shows updated but MCO may not have started yet (%ds)...", elapsed)
-                    time.sleep(poll_interval)
+                    next(sleeper)
                     continue
                 logger.info("All MachineConfigPools updated (MCO may have been fast).")
             return
 
-        time.sleep(poll_interval)
+        next(sleeper)
 
     raise OperatorError(
         f"MachineConfigPool did not finish updating within {timeout}s"

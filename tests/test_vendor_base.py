@@ -83,7 +83,7 @@ class TestVendorProfile:
 
     def test_default_pre_operator_setup_noop(self):
         vendor = FakeVendor()
-        assert vendor.pre_operator_setup(None, {}, "worker") is None
+        assert vendor.pre_operator_setup(None, {}, "worker") is False
 
     def test_default_cleanup_noop(self):
         vendor = FakeVendor()

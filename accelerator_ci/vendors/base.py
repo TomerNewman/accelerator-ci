@@ -82,11 +82,13 @@ class VendorProfile(ABC):
 
     def pre_operator_setup(
         self, oc: OcRunner, vendor_config: dict[str, Any], machine_config_role: str,
-    ) -> None:
+    ) -> bool:
         """Vendor setup before operators are installed (MachineConfigs, labels, etc.).
 
         *machine_config_role* is ``"worker"`` or ``"master"`` (SNO).
+        Return True if MachineConfigs were applied (triggers MCP wait).
         """
+        return False
 
     def cleanup(self, oc: OcRunner) -> None:
         """Reverse the operator stack installation. Called by ``cleanup`` command."""

@@ -75,14 +75,14 @@ class Profile(VendorProfile):
 
     def pre_operator_setup(
         self, oc: OcRunner, vendor_config: dict[str, Any], machine_config_role: str,
-    ) -> None:
+    ) -> bool:
         logger.info("Labeling %s nodes with %s=true", machine_config_role, NODE_LABEL)
         oc.oc(
             "label", "nodes",
             f"--selector=node-role.kubernetes.io/{machine_config_role}=",
             f"{NODE_LABEL}=true", "--overwrite",
         )
-
+        return False
     def post_operator_setup(
         self, oc: OcRunner, vendor_config: dict[str, Any], ocp_version: str | None,
     ) -> None:

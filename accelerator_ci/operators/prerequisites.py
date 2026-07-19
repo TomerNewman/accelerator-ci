@@ -6,6 +6,7 @@ import logging
 import time
 
 from accelerator_ci.operators.errors import OperatorError
+from accelerator_ci.shared import adaptive_sleep
 from accelerator_ci.shared.oc_runner import OcRunner
 from accelerator_ci.operators.constants import (
     REGISTRY_NAMESPACE,
@@ -27,6 +28,7 @@ REQUIRED_OPERATOR_PATTERNS = [
 def verify_required_operators(oc: OcRunner, timeout: int = 300) -> None:
     logger.info("Verifying required cluster operators...")
     start = time.monotonic()
+    sleeper = adaptive_sleep(3, 1.5, 15)
     while True:
         if time.monotonic() - start > timeout:
             raise OperatorError(
@@ -48,7 +50,7 @@ def verify_required_operators(oc: OcRunner, timeout: int = 300) -> None:
         if all_ok:
             logger.info("All required operators are running.")
             return
-        time.sleep(15)
+        next(sleeper)
 
 
 def configure_internal_registry(oc: OcRunner, timeout: int = 120) -> None:
@@ -79,12 +81,13 @@ def configure_internal_registry(oc: OcRunner, timeout: int = 120) -> None:
         )
 
     start = time.monotonic()
+    sleeper = adaptive_sleep(3, 1.5, 10)
     while time.monotonic() - start < timeout:
         r = oc.oc("get", "pods", "-n", REGISTRY_NAMESPACE, "--no-headers", timeout=30)
         if r.returncode == 0 and "Running" in (r.stdout or ""):
             logger.info("Internal registry is running.")
             return
-        time.sleep(10)
+        next(sleeper)
 
     raise OperatorError(
         f"Timeout ({timeout}s) waiting for registry pod in {REGISTRY_NAMESPACE}"

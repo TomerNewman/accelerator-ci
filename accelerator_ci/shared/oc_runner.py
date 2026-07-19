@@ -7,13 +7,11 @@ import os
 import re
 import shlex
 import subprocess
-import tempfile
 import time
-import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from accelerator_ci.shared.ssh import ssh_cmd, scp_cmd, close_ssh_multiplexing
+from accelerator_ci.shared.ssh import ssh_cmd, close_ssh_multiplexing
 
 logger = logging.getLogger(__name__)
 
@@ -166,22 +164,17 @@ class RemoteOcRunner(OcRunner):
         return _retry_loop(_run, retries)
 
     def apply_yaml(self, yaml_content: str, timeout: int = 120) -> None:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False
-        ) as f:
-            f.write(yaml_content)
-            local_path = f.name
-        remote_path = f"/tmp/apply-{uuid.uuid4().hex}.yaml"
-        try:
-            scp_cmd(local_path, f"{self.user}@{self.host}:{remote_path}")
-            r = self.oc("apply", "-f", remote_path, timeout=timeout)
-            if r.returncode != 0:
-                raise RuntimeError(
-                    f"oc apply failed: {r.stderr or r.stdout or 'unknown error'}"
-                )
-        finally:
-            Path(local_path).unlink(missing_ok=True)
-            ssh_cmd(self.host, self.user, f"rm -f {remote_path}", check=False)
+        r = ssh_cmd(
+            self.host, self.user,
+            f"KUBECONFIG={self.remote_kubeconfig} oc apply -f -",
+            check=False,
+            timeout=timeout,
+            input=yaml_content,
+        )
+        if r.returncode != 0:
+            raise RuntimeError(
+                f"oc apply failed: {r.stderr or r.stdout or 'unknown error'}"
+            )
 
     def close(self) -> None:
         close_ssh_multiplexing(self.host, self.user)
